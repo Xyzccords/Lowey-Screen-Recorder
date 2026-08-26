@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self';" />
+  <title>Lowey Screen Recorder</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="app-header">
+    <h1>Lowey Screen Recorder</h1>
+    <div class="rec-status" id="recStatus">
+      <span class="dot" id="recDot"></span>
+      <span id="recTimer">00:00:00</span>
+    </div>
+  </header>
+
+  <main>
+    <section class="panel sources-panel">
+      <div class="panel-title">
+        <h2>Pantallas y aplicaciones</h2>
+        <button id="refreshSources" class="ghost-btn" title="Actualizar lista">⟳ Actualizar</button>
+      </div>
+      <div id="sourcesGrid" class="sources-grid"></div>
+    </section>
+
+    <section class="panel options-panel">
+      <h2>Opciones</h2>
+
+      <label class="field">
+        <span>Calidad final</span>
+        <select id="qualitySelect"></select>
+        <small id="qualityHint" class="hint"></small>
+      </label>
+
+      <label class="field">
+        <span>Cuadros por segundo</span>
+        <select id="fpsSelect">
+          <option value="30">30 fps</option>
+          <option value="60">60 fps</option>
+        </select>
+      </label>
+
+      <label class="checkbox-field">
+        <input type="checkbox" id="micToggle" />
+        <span>Grabar micrófono</span>
+      </label>
+
+      <label class="checkbox-field">
+        <input type="checkbox" id="systemAudioToggle" checked />
+        <span>Grabar audio del sistema (si está disponible)</span>
+      </label>
+
+      <label class="field">
+        <span>Carpeta de destino</span>
+        <div class="folder-row">
+          <input type="text" id="outputDir" readonly />
+          <button id="chooseFolder" class="ghost-btn">Elegir…</button>
+        </div>
+      </label>
+
+      <button id="recordBtn" class="record-btn">● Iniciar grabación</button>
+
+      <div id="encodeProgressWrap" class="progress-wrap hidden">
+        <p>Optimizando video (compresión de alta calidad)…</p>
+        <progress id="encodeProgress" max="100" value="0"></progress>
+      </div>
+
+      <div id="resultBox" class="result-box hidden"></div>
+    </section>
+  </main>
+
+  <script src="renderer.js"></script>
+</body>
+</html>
