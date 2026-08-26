@@ -28,20 +28,30 @@ Al final de cada grabación la app muestra el tamaño de la captura intermedia v
 
 No hace falta instalar `ffmpeg` por separado: se incluye automáticamente vía `ffmpeg-static`.
 
-## Instalación y uso
+## Instalar (sin tocar código)
+
+En la sección [Releases](https://github.com/Xyzccords/Lowey-Screen-Recorder/releases) del repositorio se publican automáticamente los instaladores listos para usar:
+
+- **Windows**: `Lowey Screen Recorder Setup X.X.X.exe`. Es un instalador NSIS normal: permite elegir la carpeta de instalación, crea accesos directos y **queda registrado en "Agregar o quitar programas" con su propio desinstalador**.
+- **macOS**: `Lowey Screen Recorder-X.X.X.dmg`.
+- **Linux**: `Lowey Screen Recorder-X.X.X.AppImage` (no requiere instalación, se ejecuta directo).
+
+Los instaladores se generan y publican solos con GitHub Actions cada vez que se crea un tag `vX.X.X` (ver `.github/workflows/release.yml`).
+
+## Desarrollo (correr desde el código fuente)
 
 ```bash
 npm install
 npm start
 ```
 
-## Generar instalador/ejecutable
+## Generar instalador/ejecutable localmente
 
 ```bash
 npm run dist
 ```
 
-Genera el instalador para el sistema operativo actual (NSIS en Windows, DMG en macOS, AppImage en Linux) usando `electron-builder`.
+Genera el instalador para el sistema operativo actual (NSIS en Windows, DMG en macOS, AppImage en Linux) usando `electron-builder`. Para publicarlo directamente en un Release de GitHub: `GH_TOKEN=<token> npx electron-builder --publish always`.
 
 ## Notas sobre el audio del sistema
 
