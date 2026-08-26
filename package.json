@@ -28,7 +28,8 @@
     "publish": {
       "provider": "github",
       "owner": "Xyzccords",
-      "repo": "Lowey-Screen-Recorder"
+      "repo": "Lowey-Screen-Recorder",
+      "releaseType": "release"
     },
     "win": {
       "target": "nsis"
