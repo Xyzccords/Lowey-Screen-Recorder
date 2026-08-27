@@ -28,7 +28,8 @@ const QUALITY_HINTS = {
   maxima: 'H.265, CRF 18. Prácticamente sin pérdida visible. Archivos más grandes que "alta" pero muy por debajo de una grabación a bitrate fijo.',
   alta: 'H.265, CRF 22. Muy buena calidad para tutoriales y gameplay, tamaño reducido. Recomendado.',
   equilibrada: 'H.264, CRF 23. Máxima compatibilidad (WhatsApp, redes, edición), buen balance calidad/peso.',
-  ligera: 'H.264, CRF 28. Prioriza el tamaño de archivo sobre el detalle fino.'
+  ligera: 'H.264, CRF 28. Prioriza el tamaño de archivo sobre el detalle fino.',
+  rapidaGpu: 'Usa la placa de video (NVIDIA/Intel/AMD) para codificar en segundos en vez de minutos. El archivo pesa un poco más que "Alta" para la misma calidad. Si no encuentra GPU compatible, cae a CPU automáticamente.'
 };
 
 let selectedSourceId = null;
@@ -293,6 +294,7 @@ async function onRecordingStopped() {
       <div>Archivo final: <strong>${result.outputPath}</strong></div>
       <div>Tamaño final: ${formatBytes(result.finalSizeBytes)}</div>
       <div>Captura intermedia: ${formatBytes(result.tempSizeBytes)}</div>
+      ${result.encoderUsed ? `<div>Codificado con: ${result.encoderUsed}</div>` : ''}
       ${savedPercent > 0 ? `<div class="saving">Ahorro por recompresión: ${savedPercent}%</div>` : ''}
       <div style="margin-top:8px;"><button id="openFolderBtn" class="ghost-btn">Abrir carpeta</button></div>
     `;

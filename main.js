@@ -18,8 +18,18 @@ const QUALITY_PRESETS = {
   maxima: { codec: 'libx265', crf: 18, preset: 'medium', tag: 'hvc1', label: 'Máxima calidad (H.265 CRF 18)' },
   alta: { codec: 'libx265', crf: 22, preset: 'medium', tag: 'hvc1', label: 'Alta calidad (H.265 CRF 22)' },
   equilibrada: { codec: 'libx264', crf: 23, preset: 'medium', label: 'Equilibrada (H.264 CRF 23)' },
-  ligera: { codec: 'libx264', crf: 28, preset: 'faster', label: 'Ligera (H.264 CRF 28)' }
+  ligera: { codec: 'libx264', crf: 28, preset: 'faster', label: 'Ligera (H.264 CRF 28)' },
+  rapidaGpu: { gpu: true, label: 'Rápida (GPU, un poco más pesada)' }
 };
+
+// Se prueban en este orden porque no sabemos de antemano qué GPU tiene el
+// usuario; cada intento falla casi al instante si esa marca no está presente,
+// así que probarlas todas es barato. Si ninguna anda, se cae a CPU (libx264).
+const GPU_ENCODERS = [
+  { name: 'NVIDIA (NVENC)', args: ['-c:v', 'h264_nvenc', '-preset', 'p6', '-rc', 'vbr', '-cq', '23', '-b:v', '0'] },
+  { name: 'Intel (Quick Sync)', args: ['-c:v', 'h264_qsv', '-global_quality', '23'] },
+  { name: 'AMD (AMF)', args: ['-c:v', 'h264_amf', '-rc', 'cqp', '-qp_i', '23', '-qp_p', '23'] }
+];
 
 let mainWindow;
 const writeStreams = new Map();
@@ -155,24 +165,7 @@ function parseTimeSeconds(text) {
   return Number(h) * 3600 + Number(m) * 60 + Number(s);
 }
 
-ipcMain.handle('finish-recording', async (event, { tempPath, outputDir, baseName, qualityId, keepAudio }) => {
-  const preset = QUALITY_PRESETS[qualityId] || QUALITY_PRESETS.alta;
-  fs.mkdirSync(outputDir, { recursive: true });
-
-  const ext = preset.codec === 'libx265' ? 'mp4' : 'mp4';
-  const outputPath = path.join(outputDir, `${baseName}.${ext}`);
-
-  const args = ['-y', '-i', tempPath];
-  args.push('-c:v', preset.codec, '-crf', String(preset.crf), '-preset', preset.preset, '-pix_fmt', 'yuv420p');
-  if (preset.tag) args.push('-tag:v', preset.tag);
-
-  if (keepAudio) {
-    args.push('-c:a', 'aac', '-b:a', '160k');
-  } else {
-    args.push('-an');
-  }
-  args.push('-movflags', '+faststart', outputPath);
-
+function runFfmpeg(args) {
   return new Promise((resolve, reject) => {
     const ff = spawn(ffmpegPath, args);
     let totalDuration = null;
@@ -201,19 +194,57 @@ ipcMain.handle('finish-recording', async (event, { tempPath, outputDir, baseName
         reject(new Error(`ffmpeg terminó con código ${code}:\n${stderrBuffer.slice(-2000)}`));
         return;
       }
-
-      const tempSize = fs.existsSync(tempPath) ? fs.statSync(tempPath).size : 0;
-      const finalSize = fs.existsSync(outputPath) ? fs.statSync(outputPath).size : 0;
-
-      fs.unlink(tempPath, () => {});
-
-      resolve({
-        outputPath,
-        tempSizeBytes: tempSize,
-        finalSizeBytes: finalSize
-      });
+      resolve();
     });
   });
+}
+
+ipcMain.handle('finish-recording', async (event, { tempPath, outputDir, baseName, qualityId, keepAudio }) => {
+  const preset = QUALITY_PRESETS[qualityId] || QUALITY_PRESETS.alta;
+  fs.mkdirSync(outputDir, { recursive: true });
+  const outputPath = path.join(outputDir, `${baseName}.mp4`);
+
+  const audioArgs = keepAudio ? ['-c:a', 'aac', '-b:a', '160k'] : ['-an'];
+  const trailingArgs = ['-pix_fmt', 'yuv420p', ...audioArgs, '-movflags', '+faststart', outputPath];
+
+  const encode = (encoderArgs) => runFfmpeg(['-y', '-i', tempPath, ...encoderArgs, ...trailingArgs]);
+
+  let encoderUsed;
+  if (preset.gpu) {
+    let succeeded = false;
+    for (const encoder of GPU_ENCODERS) {
+      try {
+        await encode(encoder.args);
+        encoderUsed = encoder.name;
+        succeeded = true;
+        break;
+      } catch (err) {
+        // Esta GPU/encoder no está disponible en esta máquina: probar la siguiente.
+      }
+    }
+    if (!succeeded) {
+      const cpuFallback = QUALITY_PRESETS.equilibrada;
+      await encode(['-c:v', cpuFallback.codec, '-crf', String(cpuFallback.crf), '-preset', cpuFallback.preset]);
+      encoderUsed = 'CPU (ninguna GPU compatible encontrada)';
+    }
+  } else {
+    const encoderArgs = ['-c:v', preset.codec, '-crf', String(preset.crf), '-preset', preset.preset];
+    if (preset.tag) encoderArgs.push('-tag:v', preset.tag);
+    await encode(encoderArgs);
+    encoderUsed = 'CPU';
+  }
+
+  const tempSize = fs.existsSync(tempPath) ? fs.statSync(tempPath).size : 0;
+  const finalSize = fs.existsSync(outputPath) ? fs.statSync(outputPath).size : 0;
+
+  fs.unlink(tempPath, () => {});
+
+  return {
+    outputPath,
+    tempSizeBytes: tempSize,
+    finalSizeBytes: finalSize,
+    encoderUsed
+  };
 });
 
 ipcMain.handle('show-in-folder', (event, filePath) => {

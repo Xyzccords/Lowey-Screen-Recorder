@@ -16,7 +16,7 @@ Al final de cada grabación la app muestra el tamaño de la captura intermedia v
 ## Funciones
 
 - Grabar **toda la pantalla** o **una aplicación/ventana específica**.
-- 4 perfiles de calidad final: Máxima (H.265 CRF 18), Alta (H.265 CRF 22, recomendado), Equilibrada (H.264 CRF 23, máxima compatibilidad) y Ligera (H.264 CRF 28).
+- 5 perfiles de calidad final: Máxima (H.265 CRF 18), Alta (H.265 CRF 22, recomendado), Equilibrada (H.264 CRF 23, máxima compatibilidad), Ligera (H.264 CRF 28) y Rápida (GPU: NVENC/Quick Sync/AMF, codifica en segundos en vez de minutos a costa de un archivo un poco más pesado; si no encuentra una GPU compatible, cae a CPU automáticamente).
 - 30 o 60 fps.
 - Audio del sistema y/o micrófono (se mezclan automáticamente si se activan ambos).
 - Elegir carpeta de destino.
