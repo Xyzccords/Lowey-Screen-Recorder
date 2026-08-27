@@ -3,7 +3,13 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { spawn } = require('child_process');
-const ffmpegPath = require('ffmpeg-static');
+
+// ffmpeg-static resuelve una ruta dentro de app.asar, pero los binarios no se
+// pueden ejecutar directamente desde ahí. electron-builder lo desempaqueta a
+// app.asar.unpacked (ver "asarUnpack" en package.json); acá corregimos la ruta.
+const ffmpegPath = app.isPackaged
+  ? require('ffmpeg-static').replace('app.asar', 'app.asar.unpacked')
+  : require('ffmpeg-static');
 
 // Presets de recompresión: usan CRF (calidad constante) en vez de bitrate fijo,
 // que es lo que permite lograr "misma calidad, menos peso" frente a grabadores

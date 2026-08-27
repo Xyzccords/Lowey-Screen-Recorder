@@ -1,6 +1,6 @@
 {
   "name": "lowey-screen-recorder",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Grabador de pantalla y aplicaciones ligero: máxima calidad con el mínimo peso de archivo posible.",
   "main": "main.js",
   "private": true,
@@ -24,6 +24,9 @@
       "preload.js",
       "src/**/*",
       "node_modules/**/*"
+    ],
+    "asarUnpack": [
+      "node_modules/ffmpeg-static/**"
     ],
     "publish": {
       "provider": "github",
