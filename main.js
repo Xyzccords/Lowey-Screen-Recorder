@@ -47,6 +47,21 @@ app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) createWindow();
 });
 
+app.on('render-process-gone', (event, webContents, details) => {
+  dialog.showErrorBox(
+    'Lowey Screen Recorder',
+    `La ventana se cerró inesperadamente (motivo: ${details.reason}). ` +
+      'Si pasó justo al iniciar una grabación, probá desactivar "Grabar audio del sistema" y reintentar.'
+  );
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught exception en el proceso principal:', err);
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    dialog.showErrorBox('Lowey Screen Recorder', `Error inesperado: ${err.message}`);
+  }
+});
+
 ipcMain.handle('get-sources', async () => {
   const sources = await desktopCapturer.getSources({
     types: ['window', 'screen'],

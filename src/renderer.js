@@ -14,6 +14,16 @@ const encodeProgressWrap = document.getElementById('encodeProgressWrap');
 const encodeProgress = document.getElementById('encodeProgress');
 const resultBox = document.getElementById('resultBox');
 
+window.addEventListener('error', (event) => {
+  console.error('Error en la interfaz:', event.error || event.message);
+  alert(`Ocurrió un error: ${event.message}`);
+});
+
+window.addEventListener('unhandledrejection', (event) => {
+  console.error('Promesa rechazada sin manejar:', event.reason);
+  alert(`Ocurrió un error: ${event.reason && event.reason.message ? event.reason.message : event.reason}`);
+});
+
 const QUALITY_HINTS = {
   maxima: 'H.265, CRF 18. Prácticamente sin pérdida visible. Archivos más grandes que "alta" pero muy por debajo de una grabación a bitrate fijo.',
   alta: 'H.265, CRF 22. Muy buena calidad para tutoriales y gameplay, tamaño reducido. Recomendado.',
@@ -113,38 +123,43 @@ function stopAllStreams() {
 }
 
 async function buildCaptureStream(sourceId, fps, wantMic, wantSystemAudio) {
-  const videoConstraints = {
-    audio: false,
-    video: {
-      mandatory: {
-        chromeMediaSource: 'desktop',
-        chromeMediaSourceId: sourceId,
-        minFrameRate: fps,
-        maxFrameRate: fps
-      }
+  const videoConstraint = {
+    mandatory: {
+      chromeMediaSource: 'desktop',
+      chromeMediaSourceId: sourceId,
+      minFrameRate: fps,
+      maxFrameRate: fps
     }
   };
 
-  let desktopAudioStream = null;
-  if (wantSystemAudio) {
-    try {
-      desktopAudioStream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          mandatory: {
-            chromeMediaSource: 'desktop',
-            chromeMediaSourceId: sourceId
-          }
-        },
-        video: false
-      });
-    } catch (err) {
-      desktopAudioStream = null;
+  const desktopAudioConstraint = {
+    mandatory: {
+      chromeMediaSource: 'desktop',
+      chromeMediaSourceId: sourceId
     }
+  };
+
+  // Chromium exige pedir el audio de escritorio (loopback) en la MISMA llamada
+  // a getUserMedia que el video: pedirlo por separado (solo audio) puede colgar
+  // o tirar abajo el proceso de renderizado en algunos sistemas Windows.
+  let desktopStream;
+  try {
+    desktopStream = await navigator.mediaDevices.getUserMedia({
+      audio: wantSystemAudio ? desktopAudioConstraint : false,
+      video: videoConstraint
+    });
+  } catch (err) {
+    if (!wantSystemAudio) throw err;
+    // Reintentar sin audio del sistema por si el origen elegido no lo soporta.
+    desktopStream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: videoConstraint
+    });
   }
 
-  const videoStream = await navigator.mediaDevices.getUserMedia(videoConstraints);
+  const videoStream = desktopStream;
+  const desktopAudioStream = desktopStream.getAudioTracks().length > 0 ? desktopStream : null;
   activeStreams.push(videoStream);
-  if (desktopAudioStream) activeStreams.push(desktopAudioStream);
 
   let micStream = null;
   if (wantMic) {
