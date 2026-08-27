@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, desktopCapturer, dialog, shell, globalShortcut } = require('electron');
+const { app, BrowserWindow, ipcMain, desktopCapturer, dialog, shell, globalShortcut, screen } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -15,23 +15,35 @@ const ffmpegPath = app.isPackaged
 // que es lo que permite lograr "misma calidad, menos peso" frente a grabadores
 // que graban directo a un bitrate alto durante toda la sesión.
 const QUALITY_PRESETS = {
-  maxima: { codec: 'libx265', crf: 18, preset: 'medium', tag: 'hvc1', label: 'Máxima calidad (H.265 CRF 18)' },
-  alta: { codec: 'libx265', crf: 22, preset: 'medium', tag: 'hvc1', label: 'Alta calidad (H.265 CRF 22)' },
+  rapidaGpu: { gpu: true, label: 'Rápida (GPU)' },
   equilibrada: { codec: 'libx264', crf: 23, preset: 'medium', label: 'Equilibrada (H.264 CRF 23)' },
-  ligera: { codec: 'libx264', crf: 28, preset: 'faster', label: 'Ligera (H.264 CRF 28)' },
-  rapidaGpu: { gpu: true, label: 'Rápida (GPU, un poco más pesada)' }
+  ligera: { codec: 'libx264', crf: 28, preset: 'faster', label: 'Ligera (H.264 CRF 28)' }
+};
+
+// Salidas de resolución disponibles para achicar el peso final independiente
+// de la calidad elegida. "-2" en el filtro scale mantiene la relación de
+// aspecto y garantiza un ancho par (lo exigen los encoders).
+const RESOLUTION_HEIGHTS = {
+  original: null,
+  '1080p': 1080,
+  '720p': 720,
+  '480p': 480
 };
 
 // Se prueban en este orden porque no sabemos de antemano qué GPU tiene el
 // usuario; cada intento falla casi al instante si esa marca no está presente,
-// así que probarlas todas es barato. Si ninguna anda, se cae a CPU (libx264).
+// así que probarlas todas es barato. HEVC va primero porque pesa bastante
+// menos que H.264 en las GPU que lo soportan bien (NVIDIA Turing/GTX 16xx en
+// adelante); si falla, se prueba H.264 por GPU y por último se cae a CPU.
 const GPU_ENCODERS = [
-  { name: 'NVIDIA (NVENC)', args: ['-c:v', 'h264_nvenc', '-preset', 'p6', '-rc', 'vbr', '-cq', '23', '-b:v', '0'] },
-  { name: 'Intel (Quick Sync)', args: ['-c:v', 'h264_qsv', '-global_quality', '23'] },
-  { name: 'AMD (AMF)', args: ['-c:v', 'h264_amf', '-rc', 'cqp', '-qp_i', '23', '-qp_p', '23'] }
+  { name: 'NVIDIA (NVENC HEVC)', args: ['-c:v', 'hevc_nvenc', '-preset', 'p6', '-rc', 'vbr', '-cq', '25', '-b:v', '0', '-tag:v', 'hvc1'] },
+  { name: 'NVIDIA (NVENC H.264)', args: ['-c:v', 'h264_nvenc', '-preset', 'p6', '-rc', 'vbr', '-cq', '25', '-b:v', '0'] },
+  { name: 'Intel (Quick Sync)', args: ['-c:v', 'h264_qsv', '-global_quality', '25'] },
+  { name: 'AMD (AMF)', args: ['-c:v', 'h264_amf', '-rc', 'cqp', '-qp_i', '25', '-qp_p', '25'] }
 ];
 
 let mainWindow;
+let floatingWindow;
 const writeStreams = new Map();
 
 // Atajo global para iniciar/detener la grabación sin tener que hacer foco
@@ -55,6 +67,36 @@ function createWindow() {
 
   mainWindow.setMenuBarVisibility(false);
   mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
+}
+
+function createFloatingWindow() {
+  const display = screen.getPrimaryDisplay();
+  const width = 150;
+  const height = 46;
+
+  floatingWindow = new BrowserWindow({
+    width,
+    height,
+    x: display.workArea.x + display.workArea.width - width - 16,
+    y: display.workArea.y + 16,
+    frame: false,
+    transparent: true,
+    alwaysOnTop: true,
+    resizable: false,
+    skipTaskbar: true,
+    focusable: false,
+    backgroundColor: '#00000000',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+
+  floatingWindow.setAlwaysOnTop(true, 'screen-saver');
+  // Evita que el propio indicador aparezca en la grabación (Windows/macOS).
+  floatingWindow.setContentProtection(true);
+  floatingWindow.loadFile(path.join(__dirname, 'src', 'floating.html'));
 }
 
 app.whenReady().then(() => {
@@ -114,6 +156,35 @@ ipcMain.handle('get-sources', async () => {
 });
 
 ipcMain.handle('get-record-shortcut', () => RECORD_SHORTCUT);
+
+ipcMain.handle('get-resolution-options', () => Object.keys(RESOLUTION_HEIGHTS));
+
+ipcMain.on('recording-started', (event, startedAt) => {
+  if (!floatingWindow || floatingWindow.isDestroyed()) createFloatingWindow();
+  floatingWindow.webContents.once('did-finish-load', () => {
+    floatingWindow.webContents.send('floating-start', startedAt);
+  });
+  if (!floatingWindow.webContents.isLoading()) {
+    floatingWindow.webContents.send('floating-start', startedAt);
+  }
+  floatingWindow.showInactive();
+});
+
+ipcMain.on('recording-stopped', () => {
+  if (floatingWindow && !floatingWindow.isDestroyed()) {
+    floatingWindow.hide();
+  }
+});
+
+ipcMain.handle('get-source-preview', async (event, sourceId) => {
+  const sources = await desktopCapturer.getSources({
+    types: ['window', 'screen'],
+    thumbnailSize: { width: 1600, height: 900 }
+  });
+  const source = sources.find((s) => s.id === sourceId);
+  if (!source || source.thumbnail.isEmpty()) return null;
+  return source.thumbnail.toDataURL();
+});
 
 ipcMain.handle('get-quality-presets', () => {
   return Object.entries(QUALITY_PRESETS).map(([id, p]) => ({ id, label: p.label }));
@@ -199,15 +270,18 @@ function runFfmpeg(args) {
   });
 }
 
-ipcMain.handle('finish-recording', async (event, { tempPath, outputDir, baseName, qualityId, keepAudio }) => {
-  const preset = QUALITY_PRESETS[qualityId] || QUALITY_PRESETS.alta;
+ipcMain.handle('finish-recording', async (event, { tempPath, outputDir, baseName, qualityId, keepAudio, resolutionId }) => {
+  const preset = QUALITY_PRESETS[qualityId] || QUALITY_PRESETS.equilibrada;
   fs.mkdirSync(outputDir, { recursive: true });
   const outputPath = path.join(outputDir, `${baseName}.mp4`);
+
+  const targetHeight = RESOLUTION_HEIGHTS[resolutionId] || null;
+  const scaleArgs = targetHeight ? ['-vf', `scale=-2:${targetHeight}`] : [];
 
   const audioArgs = keepAudio ? ['-c:a', 'aac', '-b:a', '160k'] : ['-an'];
   const trailingArgs = ['-pix_fmt', 'yuv420p', ...audioArgs, '-movflags', '+faststart', outputPath];
 
-  const encode = (encoderArgs) => runFfmpeg(['-y', '-i', tempPath, ...encoderArgs, ...trailingArgs]);
+  const encode = (encoderArgs) => runFfmpeg(['-y', '-i', tempPath, ...scaleArgs, ...encoderArgs, ...trailingArgs]);
 
   let encoderUsed;
   if (preset.gpu) {

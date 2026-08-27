@@ -2,6 +2,10 @@ const sourcesGrid = document.getElementById('sourcesGrid');
 const refreshSourcesBtn = document.getElementById('refreshSources');
 const qualitySelect = document.getElementById('qualitySelect');
 const qualityHint = document.getElementById('qualityHint');
+const resolutionSelect = document.getElementById('resolutionSelect');
+const captureModeSelect = document.getElementById('captureModeSelect');
+const captureModeInfoBtn = document.getElementById('captureModeInfoBtn');
+const captureModeInfo = document.getElementById('captureModeInfo');
 const fpsSelect = document.getElementById('fpsSelect');
 const micToggle = document.getElementById('micToggle');
 const systemAudioToggle = document.getElementById('systemAudioToggle');
@@ -14,6 +18,16 @@ const encodeProgressWrap = document.getElementById('encodeProgressWrap');
 const encodeProgress = document.getElementById('encodeProgress');
 const resultBox = document.getElementById('resultBox');
 
+const regionToggle = document.getElementById('regionToggle');
+const chooseRegionBtn = document.getElementById('chooseRegionBtn');
+const regionHint = document.getElementById('regionHint');
+const regionModal = document.getElementById('regionModal');
+const regionPreviewWrap = document.getElementById('regionPreviewWrap');
+const regionPreviewImg = document.getElementById('regionPreviewImg');
+const regionSelectionBox = document.getElementById('regionSelectionBox');
+const regionCancelBtn = document.getElementById('regionCancelBtn');
+const regionConfirmBtn = document.getElementById('regionConfirmBtn');
+
 window.addEventListener('error', (event) => {
   console.error('Error en la interfaz:', event.error || event.message);
   alert(`Ocurrió un error: ${event.message}`);
@@ -25,11 +39,16 @@ window.addEventListener('unhandledrejection', (event) => {
 });
 
 const QUALITY_HINTS = {
-  maxima: 'H.265, CRF 18. Prácticamente sin pérdida visible. Archivos más grandes que "alta" pero muy por debajo de una grabación a bitrate fijo.',
-  alta: 'H.265, CRF 22. Muy buena calidad para tutoriales y gameplay, tamaño reducido. Recomendado.',
+  rapidaGpu: 'Usa la placa de video (NVIDIA/Intel/AMD) para codificar en segundos en vez de minutos. Prueba HEVC y H.264 por GPU antes de caer a CPU automáticamente si no hay ninguna compatible.',
   equilibrada: 'H.264, CRF 23. Máxima compatibilidad (WhatsApp, redes, edición), buen balance calidad/peso.',
-  ligera: 'H.264, CRF 28. Prioriza el tamaño de archivo sobre el detalle fino.',
-  rapidaGpu: 'Usa la placa de video (NVIDIA/Intel/AMD) para codificar en segundos en vez de minutos. El archivo pesa un poco más que "Alta" para la misma calidad. Si no encuentra GPU compatible, cae a CPU automáticamente.'
+  ligera: 'H.264, CRF 28. Prioriza el tamaño de archivo sobre el detalle fino.'
+};
+
+const RESOLUTION_LABELS = {
+  original: 'Original (sin cambios)',
+  '1080p': '1080p',
+  '720p': '720p',
+  '480p': '480p'
 };
 
 let selectedSourceId = null;
@@ -41,6 +60,8 @@ let recordingId = null;
 let tempPath = null;
 let timerInterval = null;
 let recordStart = null;
+let regionRect = null; // { x, y, w, h } como fracciones (0-1) del video capturado
+let regionCleanup = null;
 
 function formatBytes(bytes) {
   if (!bytes) return '0 B';
@@ -60,6 +81,39 @@ function formatTimer(ms) {
   const m = String(Math.floor((totalSeconds % 3600) / 60)).padStart(2, '0');
   const s = String(totalSeconds % 60).padStart(2, '0');
   return `${h}:${m}:${s}`;
+}
+
+function playChime() {
+  try {
+    const ctx = new AudioContext();
+    const now = ctx.currentTime;
+    [660, 990].forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.frequency.value = freq;
+      osc.type = 'sine';
+      const start = now + i * 0.12;
+      gain.gain.setValueAtTime(0, start);
+      gain.gain.linearRampToValueAtTime(0.2, start + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, start + 0.25);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(start);
+      osc.stop(start + 0.3);
+    });
+    setTimeout(() => ctx.close(), 800);
+  } catch (err) {
+    console.error('No se pudo reproducir el sonido de aviso:', err);
+  }
+}
+
+function notifyRecordingReady(outputPath, finalSizeBytes) {
+  try {
+    new Notification('Lowey Screen Recorder', {
+      body: `Grabación lista: ${outputPath.split(/[\\/]/).pop()} (${formatBytes(finalSizeBytes)})`
+    });
+  } catch (err) {
+    console.error('No se pudo mostrar la notificación:', err);
+  }
 }
 
 async function loadSources() {
@@ -83,9 +137,14 @@ async function loadSources() {
     card.appendChild(name);
 
     card.addEventListener('click', () => {
+      if (selectedSourceId !== source.id) {
+        regionRect = null;
+        regionHint.textContent = '';
+      }
       selectedSourceId = source.id;
       document.querySelectorAll('.source-card').forEach((c) => c.classList.remove('selected'));
       card.classList.add('selected');
+      chooseRegionBtn.disabled = !regionToggle.checked;
     });
 
     sourcesGrid.appendChild(card);
@@ -101,12 +160,24 @@ async function loadQualityPresets() {
     option.textContent = preset.label;
     qualitySelect.appendChild(option);
   });
-  qualitySelect.value = 'alta';
+  qualitySelect.value = 'rapidaGpu';
   updateQualityHint();
 }
 
 function updateQualityHint() {
   qualityHint.textContent = QUALITY_HINTS[qualitySelect.value] || '';
+}
+
+async function loadResolutionOptions() {
+  const options = await window.lowey.getResolutionOptions();
+  resolutionSelect.innerHTML = '';
+  options.forEach((id) => {
+    const option = document.createElement('option');
+    option.value = id;
+    option.textContent = RESOLUTION_LABELS[id] || id;
+    resolutionSelect.appendChild(option);
+  });
+  resolutionSelect.value = 'original';
 }
 
 async function loadDefaultOutputDir() {
@@ -121,6 +192,55 @@ function stopAllStreams() {
     audioContext.close();
     audioContext = null;
   }
+  if (regionCleanup) {
+    regionCleanup();
+    regionCleanup = null;
+  }
+}
+
+// Recorta el video capturado a la región elegida dibujando cuadro a cuadro en
+// un canvas oculto. Se usa setInterval (no requestAnimationFrame) para que
+// siga grabando aunque la ventana no tenga foco ni esté visible.
+function applyRegionCrop(videoTrack, fps, rect) {
+  const settings = videoTrack.getSettings();
+  const nativeW = settings.width || 1920;
+  const nativeH = settings.height || 1080;
+
+  const even = (n) => Math.max(2, Math.round(n / 2) * 2);
+  const sx = Math.round(rect.x * nativeW);
+  const sy = Math.round(rect.y * nativeH);
+  const sw = even(rect.w * nativeW);
+  const sh = even(rect.h * nativeH);
+
+  const video = document.createElement('video');
+  video.muted = true;
+  video.style.position = 'fixed';
+  video.style.left = '-9999px';
+  video.srcObject = new MediaStream([videoTrack]);
+  document.body.appendChild(video);
+  video.play().catch(() => {});
+
+  const canvas = document.createElement('canvas');
+  canvas.width = sw;
+  canvas.height = sh;
+  const ctx = canvas.getContext('2d');
+
+  const intervalId = setInterval(() => {
+    if (video.readyState >= 2) {
+      ctx.drawImage(video, sx, sy, sw, sh, 0, 0, sw, sh);
+    }
+  }, 1000 / fps);
+
+  const canvasStream = canvas.captureStream(fps);
+
+  regionCleanup = () => {
+    clearInterval(intervalId);
+    video.pause();
+    video.srcObject = null;
+    video.remove();
+  };
+
+  return canvasStream.getVideoTracks()[0];
 }
 
 async function buildCaptureStream(sourceId, fps, wantMic, wantSystemAudio) {
@@ -173,7 +293,11 @@ async function buildCaptureStream(sourceId, fps, wantMic, wantSystemAudio) {
   }
 
   const combined = new MediaStream();
-  videoStream.getVideoTracks().forEach((track) => combined.addTrack(track));
+  if (regionRect) {
+    combined.addTrack(applyRegionCrop(videoStream.getVideoTracks()[0], fps, regionRect));
+  } else {
+    videoStream.getVideoTracks().forEach((track) => combined.addTrack(track));
+  }
 
   const audioSources = [desktopAudioStream, micStream].filter(Boolean);
   if (audioSources.length === 1) {
@@ -227,10 +351,15 @@ async function startRecording() {
   tempPath = tPath;
   window.__loweyHasAudio = captured.hasAudio;
 
-  // Bitrate alto en la etapa de captura: prioriza que no se pierda calidad
-  // ni se salteen cuadros en tiempo real. El peso final bajo se logra después,
-  // en la recompresión por CRF con ffmpeg.
-  const videoBitsPerSecond = fps >= 60 ? 60_000_000 : 40_000_000;
+  // Bitrate de la captura EN VIVO. En "Modo Visual Novel" se prioriza calidad
+  // asumiendo que el juego/app grabado no necesita muchos recursos. En
+  // "Modo juego exigente" se baja bastante para no competirle CPU a un juego
+  // pesado mientras se graba (la calidad del archivo final no se toca acá,
+  // eso lo resuelve la recompresión posterior).
+  const isLowImpact = captureModeSelect.value === 'liviano';
+  const videoBitsPerSecond = isLowImpact
+    ? (fps >= 60 ? 12_000_000 : 8_000_000)
+    : (fps >= 60 ? 60_000_000 : 40_000_000);
 
   mediaRecorder = new MediaRecorder(captured.stream, {
     mimeType: pickMimeType(),
@@ -249,6 +378,7 @@ async function startRecording() {
 
   mediaRecorder.start(1000);
   recordStart = Date.now();
+  window.lowey.notifyRecordingStarted(recordStart);
   timerInterval = setInterval(() => {
     recTimer.textContent = formatTimer(Date.now() - recordStart);
   }, 500);
@@ -261,6 +391,7 @@ async function startRecording() {
 async function onRecordingStopped() {
   clearInterval(timerInterval);
   recDot.classList.remove('live');
+  window.lowey.notifyRecordingStopped();
   stopAllStreams();
   await window.lowey.endWriteStream(recordingId);
 
@@ -282,6 +413,7 @@ async function onRecordingStopped() {
       outputDir,
       baseName,
       qualityId: qualitySelect.value,
+      resolutionId: resolutionSelect.value,
       keepAudio: window.__loweyHasAudio
     });
 
@@ -302,6 +434,9 @@ async function onRecordingStopped() {
     document.getElementById('openFolderBtn').addEventListener('click', () => {
       window.lowey.showInFolder(result.outputPath);
     });
+
+    playChime();
+    notifyRecordingReady(result.outputPath, result.finalSizeBytes);
   } catch (err) {
     resultBox.classList.remove('hidden');
     resultBox.textContent = `Error al optimizar el video: ${err.message}`;
@@ -327,6 +462,10 @@ window.lowey.onToggleRecordingShortcut(toggleRecording);
 refreshSourcesBtn.addEventListener('click', loadSources);
 qualitySelect.addEventListener('change', updateQualityHint);
 
+captureModeInfoBtn.addEventListener('click', () => {
+  captureModeInfo.classList.toggle('hidden');
+});
+
 chooseFolderBtn.addEventListener('click', async () => {
   const dir = await window.lowey.chooseSaveFolder();
   if (dir) {
@@ -341,7 +480,96 @@ async function loadShortcutHint() {
   shortcutHint.textContent = `Atajo para iniciar/detener sin abrir la ventana: "${shortcut}"`;
 }
 
+// --- Selección de región ---
+
+regionToggle.addEventListener('change', () => {
+  chooseRegionBtn.disabled = !regionToggle.checked || !selectedSourceId;
+  if (!regionToggle.checked) {
+    regionRect = null;
+    regionHint.textContent = '';
+  }
+});
+
+let dragState = null;
+
+function resetSelectionBox() {
+  regionSelectionBox.classList.add('hidden');
+  regionSelectionBox.style.width = '0px';
+  regionSelectionBox.style.height = '0px';
+  regionConfirmBtn.disabled = true;
+}
+
+chooseRegionBtn.addEventListener('click', async () => {
+  if (!selectedSourceId) return;
+  const dataUrl = await window.lowey.getSourcePreview(selectedSourceId);
+  if (!dataUrl) {
+    alert('No se pudo generar la vista previa de esta fuente.');
+    return;
+  }
+  regionPreviewImg.src = dataUrl;
+  resetSelectionBox();
+  regionModal.classList.remove('hidden');
+});
+
+regionPreviewWrap.addEventListener('mousedown', (event) => {
+  const rect = regionPreviewImg.getBoundingClientRect();
+  const x = Math.min(Math.max(event.clientX - rect.left, 0), rect.width);
+  const y = Math.min(Math.max(event.clientY - rect.top, 0), rect.height);
+  dragState = { startX: x, startY: y, imgRect: rect };
+  regionSelectionBox.classList.remove('hidden');
+  regionSelectionBox.style.left = `${x}px`;
+  regionSelectionBox.style.top = `${y}px`;
+  regionSelectionBox.style.width = '0px';
+  regionSelectionBox.style.height = '0px';
+});
+
+window.addEventListener('mousemove', (event) => {
+  if (!dragState) return;
+  const { startX, startY, imgRect } = dragState;
+  const x = Math.min(Math.max(event.clientX - imgRect.left, 0), imgRect.width);
+  const y = Math.min(Math.max(event.clientY - imgRect.top, 0), imgRect.height);
+  const left = Math.min(startX, x);
+  const top = Math.min(startY, y);
+  const width = Math.abs(x - startX);
+  const height = Math.abs(y - startY);
+  regionSelectionBox.style.left = `${left}px`;
+  regionSelectionBox.style.top = `${top}px`;
+  regionSelectionBox.style.width = `${width}px`;
+  regionSelectionBox.style.height = `${height}px`;
+});
+
+window.addEventListener('mouseup', () => {
+  if (!dragState) return;
+  const width = parseFloat(regionSelectionBox.style.width);
+  const height = parseFloat(regionSelectionBox.style.height);
+  regionConfirmBtn.disabled = width < 10 || height < 10;
+  dragState = null;
+});
+
+regionConfirmBtn.addEventListener('click', () => {
+  const imgRect = regionPreviewImg.getBoundingClientRect();
+  const left = parseFloat(regionSelectionBox.style.left);
+  const top = parseFloat(regionSelectionBox.style.top);
+  const width = parseFloat(regionSelectionBox.style.width);
+  const height = parseFloat(regionSelectionBox.style.height);
+
+  regionRect = {
+    x: left / imgRect.width,
+    y: top / imgRect.height,
+    w: width / imgRect.width,
+    h: height / imgRect.height
+  };
+
+  regionHint.textContent = `Región elegida: ${Math.round(regionRect.w * 100)}% x ${Math.round(regionRect.h * 100)}% de la pantalla ✓`;
+  regionModal.classList.add('hidden');
+});
+
+regionCancelBtn.addEventListener('click', () => {
+  regionModal.classList.add('hidden');
+});
+
 loadSources();
 loadQualityPresets();
+loadResolutionOptions();
 loadDefaultOutputDir();
 loadShortcutHint();

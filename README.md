@@ -15,12 +15,16 @@ Al final de cada grabación la app muestra el tamaño de la captura intermedia v
 
 ## Funciones
 
-- Grabar **toda la pantalla** o **una aplicación/ventana específica**.
-- 5 perfiles de calidad final: Máxima (H.265 CRF 18), Alta (H.265 CRF 22, recomendado), Equilibrada (H.264 CRF 23, máxima compatibilidad), Ligera (H.264 CRF 28) y Rápida (GPU: NVENC/Quick Sync/AMF, codifica en segundos en vez de minutos a costa de un archivo un poco más pesado; si no encuentra una GPU compatible, cae a CPU automáticamente).
+- Grabar **toda la pantalla**, **una aplicación/ventana específica**, o **una región elegida a mano** (arrastrando un rectángulo sobre una vista previa).
+- 3 perfiles de calidad final: **Rápida (GPU)** (prueba HEVC y H.264 por NVENC/Quick Sync/AMF, y si no hay GPU compatible cae a CPU sola), **Equilibrada** (H.264 CRF 23, máxima compatibilidad) y **Ligera** (H.264 CRF 28).
+- **Resolución de salida** independiente de la resolución de captura (Original / 1080p / 720p / 480p) para achicar el peso sin tocar el codec.
+- **Modo de captura**: "Modo Visual Novel" (toda la potencia, para juegos/apps livianas) o "Modo juego exigente" (baja la exigencia de la captura EN VIVO para no competirle recursos a un juego pesado corriendo al mismo tiempo; no afecta la calidad del archivo final).
 - 30 o 60 fps.
 - Audio del sistema y/o micrófono (se mezclan automáticamente si se activan ambos).
 - Elegir carpeta de destino.
 - Progreso de la optimización final y comparación de tamaños.
+- Sonido y notificación nativa de Windows al terminar de optimizar el video.
+- Indicador flotante mini con el tiempo de grabación (no aparece en la propia grabación) para cuando grabás sin tener la ventana abierta.
 - Atajo de teclado global **"F9"** para iniciar/detener la grabación sin tener que abrir la ventana de la app (así no te tapa lo que estás grabando).
 
 ## Requisitos
@@ -67,9 +71,10 @@ Si el audio del sistema no está disponible, la app simplemente graba sin él (o
 ## Estructura del proyecto
 
 ```
-main.js          Proceso principal de Electron: fuentes de captura, escritura del archivo temporal y recompresión con ffmpeg.
+main.js          Proceso principal de Electron: fuentes de captura, ventana flotante, escritura del archivo temporal y recompresión con ffmpeg.
 preload.js       Puente seguro (contextBridge) entre el proceso principal y la interfaz.
 src/index.html   Interfaz.
-src/renderer.js  Lógica de captura (getUserMedia/MediaRecorder) y control de la grabación.
+src/renderer.js  Lógica de captura (getUserMedia/MediaRecorder), recorte de región y control de la grabación.
 src/styles.css   Estilos.
+src/floating.html / floating.js  Ventanita flotante con el tiempo de grabación.
 ```

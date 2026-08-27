@@ -23,5 +23,16 @@ contextBridge.exposeInMainWorld('lowey', {
     return () => ipcRenderer.removeListener('encode-progress', listener);
   },
 
-  showInFolder: (filePath) => ipcRenderer.invoke('show-in-folder', filePath)
+  showInFolder: (filePath) => ipcRenderer.invoke('show-in-folder', filePath),
+
+  getResolutionOptions: () => ipcRenderer.invoke('get-resolution-options'),
+  getSourcePreview: (sourceId) => ipcRenderer.invoke('get-source-preview', sourceId),
+
+  notifyRecordingStarted: (startedAt) => ipcRenderer.send('recording-started', startedAt),
+  notifyRecordingStopped: () => ipcRenderer.send('recording-stopped'),
+  onFloatingStart: (callback) => {
+    const listener = (event, startedAt) => callback(startedAt);
+    ipcRenderer.on('floating-start', listener);
+    return () => ipcRenderer.removeListener('floating-start', listener);
+  }
 });
