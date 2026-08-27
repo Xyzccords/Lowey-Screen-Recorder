@@ -11,6 +11,13 @@ contextBridge.exposeInMainWorld('lowey', {
   },
   chooseSaveFolder: () => ipcRenderer.invoke('choose-save-folder'),
   getDefaultOutputDir: () => ipcRenderer.invoke('get-default-output-dir'),
+  getTempDir: () => ipcRenderer.invoke('get-temp-dir'),
+  chooseTempFolder: () => ipcRenderer.invoke('choose-temp-folder'),
+  onWriteError: (callback) => {
+    const listener = (event, data) => callback(data);
+    ipcRenderer.on('write-error', listener);
+    return () => ipcRenderer.removeListener('write-error', listener);
+  },
 
   startWriteStream: () => ipcRenderer.invoke('start-write-stream'),
   writeChunk: (id, arrayBuffer) => ipcRenderer.send('write-chunk', id, arrayBuffer),

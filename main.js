@@ -11,6 +11,36 @@ const ffmpegPath = app.isPackaged
   ? require('ffmpeg-static').replace('app.asar', 'app.asar.unpacked')
   : require('ffmpeg-static');
 
+// Preferencias simples persistidas en disco (por ahora solo la carpeta
+// temporal). os.tmpdir() en Windows siempre cae en el disco del sistema, que
+// puede no tener espacio libre para capturas largas.
+let settings = {};
+
+function getSettingsPath() {
+  return path.join(app.getPath('userData'), 'settings.json');
+}
+
+function loadSettings() {
+  try {
+    settings = JSON.parse(fs.readFileSync(getSettingsPath(), 'utf8'));
+  } catch (err) {
+    settings = {};
+  }
+}
+
+function saveSettings() {
+  try {
+    fs.mkdirSync(app.getPath('userData'), { recursive: true });
+    fs.writeFileSync(getSettingsPath(), JSON.stringify(settings));
+  } catch (err) {
+    console.error('No se pudieron guardar las preferencias:', err);
+  }
+}
+
+function getTempDir() {
+  return settings.tempDir && fs.existsSync(settings.tempDir) ? settings.tempDir : os.tmpdir();
+}
+
 // Presets de recompresión: usan CRF (calidad constante) en vez de bitrate fijo,
 // que es lo que permite lograr "misma calidad, menos peso" frente a grabadores
 // que graban directo a un bitrate alto durante toda la sesión.
@@ -100,6 +130,7 @@ function createFloatingWindow() {
 }
 
 app.whenReady().then(() => {
+  loadSettings();
   createWindow();
 
   const registered = globalShortcut.register(RECORD_SHORTCUT, () => {
@@ -202,10 +233,34 @@ ipcMain.handle('get-default-output-dir', () => {
   return path.join(app.getPath('videos'), 'Lowey Screen Recorder');
 });
 
+ipcMain.handle('get-temp-dir', () => getTempDir());
+
+ipcMain.handle('choose-temp-folder', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openDirectory', 'createDirectory']
+  });
+  if (result.canceled || result.filePaths.length === 0) return null;
+  settings.tempDir = result.filePaths[0];
+  saveSettings();
+  return settings.tempDir;
+});
+
 ipcMain.handle('start-write-stream', async () => {
   const id = `rec-${Date.now()}`;
-  const tempPath = path.join(os.tmpdir(), `${id}.webm`);
+  const tempPath = path.join(getTempDir(), `${id}.webm`);
   const stream = fs.createWriteStream(tempPath);
+  stream.on('error', (err) => {
+    console.error('Error escribiendo el archivo temporal:', err);
+    writeStreams.delete(id);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('write-error', {
+        id,
+        message: err.code === 'ENOSPC'
+          ? 'Se quedó sin espacio en disco donde se guarda el archivo temporal. Elegí otra carpeta temporal con más espacio en Opciones.'
+          : err.message
+      });
+    }
+  });
   writeStreams.set(id, stream);
   return { id, tempPath };
 });

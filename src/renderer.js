@@ -11,6 +11,8 @@ const micToggle = document.getElementById('micToggle');
 const systemAudioToggle = document.getElementById('systemAudioToggle');
 const outputDirInput = document.getElementById('outputDir');
 const chooseFolderBtn = document.getElementById('chooseFolder');
+const tempDirInput = document.getElementById('tempDir');
+const chooseTempFolderBtn = document.getElementById('chooseTempFolder');
 const recordBtn = document.getElementById('recordBtn');
 const recDot = document.getElementById('recDot');
 const recTimer = document.getElementById('recTimer');
@@ -183,6 +185,10 @@ async function loadResolutionOptions() {
 async function loadDefaultOutputDir() {
   outputDir = await window.lowey.getDefaultOutputDir();
   outputDirInput.value = outputDir;
+}
+
+async function loadTempDir() {
+  tempDirInput.value = await window.lowey.getTempDir();
 }
 
 function stopAllStreams() {
@@ -474,6 +480,18 @@ chooseFolderBtn.addEventListener('click', async () => {
   }
 });
 
+chooseTempFolderBtn.addEventListener('click', async () => {
+  const dir = await window.lowey.chooseTempFolder();
+  if (dir) tempDirInput.value = dir;
+});
+
+window.lowey.onWriteError(({ message }) => {
+  alert(`No se pudo seguir grabando: ${message}`);
+  if (mediaRecorder && mediaRecorder.state === 'recording') {
+    mediaRecorder.stop();
+  }
+});
+
 async function loadShortcutHint() {
   const shortcut = await window.lowey.getRecordShortcut();
   const shortcutHint = document.getElementById('shortcutHint');
@@ -572,4 +590,5 @@ loadSources();
 loadQualityPresets();
 loadResolutionOptions();
 loadDefaultOutputDir();
+loadTempDir();
 loadShortcutHint();

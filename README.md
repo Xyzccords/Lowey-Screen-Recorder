@@ -21,7 +21,7 @@ Al final de cada grabación la app muestra el tamaño de la captura intermedia v
 - **Modo de captura**: "Modo Visual Novel" (toda la potencia, para juegos/apps livianas) o "Modo juego exigente" (baja la exigencia de la captura EN VIVO para no competirle recursos a un juego pesado corriendo al mismo tiempo; no afecta la calidad del archivo final).
 - 30 o 60 fps.
 - Audio del sistema y/o micrófono (se mezclan automáticamente si se activan ambos).
-- Elegir carpeta de destino.
+- Elegir carpeta de destino y **carpeta temporal** por separado (útil si el disco donde Windows guarda los temporales por defecto, normalmente C:, no tiene espacio para grabaciones largas). La elección de carpeta temporal se guarda entre sesiones.
 - Progreso de la optimización final y comparación de tamaños.
 - Sonido y notificación nativa de Windows al terminar de optimizar el video.
 - Indicador flotante mini con el tiempo de grabación (no aparece en la propia grabación) para cuando grabás sin tener la ventana abierta.
