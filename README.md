@@ -21,6 +21,7 @@ Al final de cada grabación la app muestra el tamaño de la captura intermedia v
 - Audio del sistema y/o micrófono (se mezclan automáticamente si se activan ambos).
 - Elegir carpeta de destino.
 - Progreso de la optimización final y comparación de tamaños.
+- Atajo de teclado global **"F9"** para iniciar/detener la grabación sin tener que abrir la ventana de la app (así no te tapa lo que estás grabando).
 
 ## Requisitos
 

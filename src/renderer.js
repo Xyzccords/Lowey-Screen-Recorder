@@ -311,13 +311,16 @@ async function onRecordingStopped() {
   }
 }
 
-recordBtn.addEventListener('click', () => {
+function toggleRecording() {
   if (mediaRecorder && mediaRecorder.state === 'recording') {
     mediaRecorder.stop();
-  } else {
+  } else if (!recordBtn.disabled) {
     startRecording();
   }
-});
+}
+
+recordBtn.addEventListener('click', toggleRecording);
+window.lowey.onToggleRecordingShortcut(toggleRecording);
 
 refreshSourcesBtn.addEventListener('click', loadSources);
 qualitySelect.addEventListener('change', updateQualityHint);
@@ -330,6 +333,13 @@ chooseFolderBtn.addEventListener('click', async () => {
   }
 });
 
+async function loadShortcutHint() {
+  const shortcut = await window.lowey.getRecordShortcut();
+  const shortcutHint = document.getElementById('shortcutHint');
+  shortcutHint.textContent = `Atajo para iniciar/detener sin abrir la ventana: "${shortcut}"`;
+}
+
 loadSources();
 loadQualityPresets();
 loadDefaultOutputDir();
+loadShortcutHint();

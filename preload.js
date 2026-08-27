@@ -3,6 +3,12 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('lowey', {
   getSources: () => ipcRenderer.invoke('get-sources'),
   getQualityPresets: () => ipcRenderer.invoke('get-quality-presets'),
+  getRecordShortcut: () => ipcRenderer.invoke('get-record-shortcut'),
+  onToggleRecordingShortcut: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on('toggle-recording-shortcut', listener);
+    return () => ipcRenderer.removeListener('toggle-recording-shortcut', listener);
+  },
   chooseSaveFolder: () => ipcRenderer.invoke('choose-save-folder'),
   getDefaultOutputDir: () => ipcRenderer.invoke('get-default-output-dir'),
 

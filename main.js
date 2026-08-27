@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, desktopCapturer, dialog, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, desktopCapturer, dialog, shell, globalShortcut } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -24,6 +24,10 @@ const QUALITY_PRESETS = {
 let mainWindow;
 const writeStreams = new Map();
 
+// Atajo global para iniciar/detener la grabación sin tener que hacer foco
+// en la ventana (útil porque abrir la app taparía lo que se está grabando).
+const RECORD_SHORTCUT = 'F9';
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 980,
@@ -43,7 +47,22 @@ function createWindow() {
   mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  createWindow();
+
+  const registered = globalShortcut.register(RECORD_SHORTCUT, () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('toggle-recording-shortcut');
+    }
+  });
+  if (!registered) {
+    console.error(`No se pudo registrar el atajo ${RECORD_SHORTCUT} (puede estar en uso por otro programa).`);
+  }
+});
+
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll();
+});
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
@@ -83,6 +102,8 @@ ipcMain.handle('get-sources', async () => {
     isScreen: s.id.startsWith('screen:')
   }));
 });
+
+ipcMain.handle('get-record-shortcut', () => RECORD_SHORTCUT);
 
 ipcMain.handle('get-quality-presets', () => {
   return Object.entries(QUALITY_PRESETS).map(([id, p]) => ({ id, label: p.label }));
