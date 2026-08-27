@@ -91,7 +91,12 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false
+      sandbox: false,
+      // Sin esto, Chromium le baja la prioridad a los timers de la ventana
+      // cuando queda sin foco o minimizada (lo normal mientras se juega),
+      // lo que puede meter tartamudeo en la grabación aunque el juego en sí
+      // no se entere (lo dibuja la GPU aparte).
+      backgroundThrottling: false
     }
   });
 
@@ -119,7 +124,8 @@ function createFloatingWindow() {
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      backgroundThrottling: false
     }
   });
 

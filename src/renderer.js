@@ -382,7 +382,9 @@ async function startRecording() {
 
   mediaRecorder.onstop = onRecordingStopped;
 
-  mediaRecorder.start(1000);
+  // Trozos chicos y frecuentes en vez de uno grande por segundo: repartir el
+  // trabajo de volcar cada trozo a disco evita baches periódicos notorios.
+  mediaRecorder.start(250);
   recordStart = Date.now();
   window.lowey.notifyRecordingStarted(recordStart);
   timerInterval = setInterval(() => {
