@@ -382,7 +382,7 @@ function probeDurationSeconds(filePath) {
   });
 }
 
-ipcMain.handle('finish-recording', async (event, { tempPath, outputDir, baseName, qualityId, keepAudio, resolutionId }) => {
+ipcMain.handle('finish-recording', async (event, { tempPath, outputDir, baseName, qualityId, keepAudio, resolutionId, durationSecondsHint }) => {
   const preset = QUALITY_PRESETS[qualityId] || QUALITY_PRESETS.equilibrada;
   fs.mkdirSync(outputDir, { recursive: true });
   const outputPath = path.join(outputDir, `${baseName}.mp4`);
@@ -397,7 +397,14 @@ ipcMain.handle('finish-recording', async (event, { tempPath, outputDir, baseName
 
   let encoderUsed;
   if (preset.targetSize) {
-    const durationSeconds = (await probeDurationSeconds(tempPath)) || 60;
+    // La duración real (medida por el propio cronómetro de la grabación) es
+    // muchísimo más confiable que leerla del archivo: en WebM grandes/largos
+    // ffmpeg puede reportar una duración de cabecera mucho más corta que la
+    // real, lo que dispara un bitrate carísimo y un archivo final gigante.
+    // Si no la tenemos (p. ej. quedó pendiente de una sesión anterior), se
+    // sobreestima a propósito (1 hora) en vez de subestimar: quedarse corto
+    // de tamaño es un problema mucho menor que un archivo que explota.
+    const durationSeconds = durationSecondsHint || (await probeDurationSeconds(tempPath)) || 3600;
     const targetBytes = preset.targetSizeMB * 1024 * 1024;
     const audioBitrateBps = keepAudio ? 256_000 : 0;
     // 2% de margen para el overhead del contenedor, para no pasarse del objetivo.

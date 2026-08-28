@@ -71,6 +71,7 @@ let recordStart = null;
 let regionRect = null; // { x, y, w, h } como fracciones (0-1) del video capturado
 let regionCleanup = null;
 const pendingAudioMap = new Map(); // tempPath -> tenía audio al grabarse
+const pendingDurationMap = new Map(); // tempPath -> duración real medida por el cronómetro (segundos)
 let isCompressing = false;
 
 function formatBytes(bytes) {
@@ -229,6 +230,7 @@ async function loadPendingRecordings() {
       if (!confirm('¿Borrar esta captura sin optimizar? No se puede deshacer.')) return;
       await window.lowey.discardPendingRecording(item.tempPath);
       pendingAudioMap.delete(item.tempPath);
+      pendingDurationMap.delete(item.tempPath);
       loadPendingRecordings();
     });
     row.appendChild(discardBtn);
@@ -457,6 +459,7 @@ async function onRecordingStopped() {
   await window.lowey.endWriteStream(recordingId);
 
   pendingAudioMap.set(tempPath, window.__loweyHasAudio);
+  pendingDurationMap.set(tempPath, (Date.now() - recordStart) / 1000);
 
   // A diferencia de antes, grabar ya no espera a que se optimice: el botón
   // queda libre al toque para poder arrancar otra grabación ya mismo. La
@@ -485,10 +488,12 @@ async function compressOne(itemTempPath) {
     baseName,
     qualityId: qualitySelect.value,
     resolutionId: resolutionSelect.value,
-    keepAudio
+    keepAudio,
+    durationSecondsHint: pendingDurationMap.get(itemTempPath) || null
   });
 
   pendingAudioMap.delete(itemTempPath);
+  pendingDurationMap.delete(itemTempPath);
   return result;
 }
 
