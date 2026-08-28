@@ -6,17 +6,21 @@ Grabador de pantalla y aplicaciones para escritorio (Windows, macOS, Linux) pens
 
 La mayoría de los grabadores escriben el video final en tiempo real con un bitrate fijo: para no perder calidad usan un bitrate muy alto durante toda la grabación, y eso es lo que infla el tamaño del archivo.
 
-Este grabador separa el proceso en dos etapas:
+Este grabador separa el proceso en dos etapas, y esas dos etapas están **desacopladas entre sí**:
 
-1. **Captura en tiempo real**: se graba la pantalla/aplicación elegida a un bitrate alto (VP9/WebM) solo para garantizar que no se pierdan cuadros ni se degrade la imagen mientras grabás. Este archivo intermedio es temporal y pesado.
-2. **Recompresión por calidad constante (CRF)**: al detener la grabación, se vuelve a codificar automáticamente con `ffmpeg` usando H.265 o H.264 en modo **CRF** (calidad constante), que asigna más bits solo donde hay más detalle/movimiento y muchos menos donde la imagen es estática (texto, ventanas, IDEs, etc.). El resultado es un archivo final con calidad visual equivalente (o mejor) y un tamaño mucho menor. El archivo intermedio se borra automáticamente al terminar.
+1. **Captura en tiempo real**: se graba la pantalla/aplicación elegida a un bitrate alto (VP9/WebM) solo para garantizar que no se pierdan cuadros ni se degrade la imagen mientras grabás. Este archivo intermedio es temporal y pesado. Al cortar la grabación, el botón de grabar queda libre al instante — no hace falta esperar a que se optimice para poder grabar otra cosa.
+2. **Recompresión** (cuando vos quieras, desde "Grabaciones sin optimizar"): se recodifica con `ffmpeg` usando alguno de los perfiles de calidad. El archivo intermedio se borra automáticamente al terminar.
 
-Al final de cada grabación la app muestra el tamaño de la captura intermedia vs. el archivo final y el porcentaje de ahorro.
+Al final de cada optimización la app muestra el tamaño de la captura intermedia vs. el archivo final y el porcentaje de ahorro.
+
+### Grabaciones sin optimizar
+
+Como grabar y optimizar están desacoplados, cada grabación que cortás queda esperando en la sección **"Grabaciones sin optimizar"** (debajo de las fuentes de captura) hasta que elijas comprimirla — podés seleccionar varias a la vez y se procesan en orden, o descartar las que no querés conservar. Usan la calidad y resolución que tengas elegidas en "Opciones" en el momento de comprimir.
 
 ## Funciones
 
 - Grabar **toda la pantalla**, **una aplicación/ventana específica**, o **una región elegida a mano** (arrastrando un rectángulo sobre una vista previa).
-- 3 perfiles de calidad final: **Rápida (GPU)** (prueba HEVC y H.264 por NVENC/Quick Sync/AMF, y si no hay GPU compatible cae a CPU sola), **Equilibrada** (H.264 CRF 23, máxima compatibilidad) y **Ligera** (H.264 CRF 28).
+- 4 perfiles de calidad final: **Rápida (GPU)** (prueba HEVC y H.264 por NVENC/Quick Sync/AMF, y si no hay GPU compatible cae a CPU sola), **Equilibrada** (H.264 CRF 23, máxima compatibilidad), **Ligera** (H.264 CRF 28) y **Tamaño objetivo** (2 pasadas calculando el bitrate para que entre en ~1GB con la mejor calidad posible para ese tamaño, sin recodificar el audio — para grabaciones muy largas el bitrate resultante baja proporcionalmente, es la naturaleza de apuntar a un tamaño fijo).
 - **Resolución de salida** independiente de la resolución de captura (Original / 1080p / 720p / 480p) para achicar el peso sin tocar el codec.
 - **Modo de captura**: "Modo Visual Novel" (toda la potencia, para juegos/apps livianas) o "Modo juego exigente" (baja la exigencia de la captura EN VIVO para no competirle recursos a un juego pesado corriendo al mismo tiempo; no afecta la calidad del archivo final).
 - 30 o 60 fps.
