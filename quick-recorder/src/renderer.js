@@ -546,7 +546,7 @@ compressSelectedBtn.addEventListener('click', async () => {
   if (results.length > 0) {
     playChime();
     try {
-      new Notification('Lowey Quick Recorder', {
+      new Notification("Abi's Quick Recorder", {
         body: results.length === 1
           ? `Grabación lista: ${results[0].outputPath.split(/[\\/]/).pop()} (${formatBytes(results[0].finalSizeBytes)})`
           : `${results.length} grabaciones optimizadas.`

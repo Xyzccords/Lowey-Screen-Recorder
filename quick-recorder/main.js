@@ -169,7 +169,7 @@ app.on('activate', () => {
 
 app.on('render-process-gone', (event, webContents, details) => {
   dialog.showErrorBox(
-    'Lowey Quick Recorder',
+    "Abi's Quick Recorder",
     `La ventana se cerró inesperadamente (motivo: ${details.reason}). ` +
       'Si pasó justo al iniciar una grabación, probá desactivar "Grabar audio del sistema" y reintentar.'
   );
@@ -178,7 +178,7 @@ app.on('render-process-gone', (event, webContents, details) => {
 process.on('uncaughtException', (err) => {
   console.error('Uncaught exception en el proceso principal:', err);
   if (mainWindow && !mainWindow.isDestroyed()) {
-    dialog.showErrorBox('Lowey Quick Recorder', `Error inesperado: ${err.message}`);
+    dialog.showErrorBox("Abi's Quick Recorder", `Error inesperado: ${err.message}`);
   }
 });
 
@@ -242,7 +242,7 @@ ipcMain.handle('choose-save-folder', async () => {
 });
 
 ipcMain.handle('get-default-output-dir', () => {
-  return path.join(app.getPath('videos'), 'Lowey Quick Recorder');
+  return path.join(app.getPath('videos'), "Abi's Quick Recorder");
 });
 
 ipcMain.handle('get-temp-dir', () => getTempDir());

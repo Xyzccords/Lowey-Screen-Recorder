@@ -1,6 +1,6 @@
 {
-  "name": "lowey-quick-recorder",
-  "version": "1.0.0",
+  "name": "abis-quick-recorder",
+  "version": "1.0.1",
   "description": "Grabación instantánea sin esperas: grabá seguido sin cortes, y comprimí cuando quieras desde una cola de pendientes.",
   "main": "main.js",
   "private": true,
@@ -17,8 +17,8 @@
     "electron-builder": "^24.13.3"
   },
   "build": {
-    "appId": "com.lowey.quickrecorder",
-    "productName": "Lowey Quick Recorder",
+    "appId": "com.abi.quickrecorder",
+    "productName": "Abi's Quick Recorder",
     "files": [
       "main.js",
       "preload.js",

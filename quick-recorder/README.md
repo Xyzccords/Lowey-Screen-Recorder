@@ -1,8 +1,8 @@
-# Lowey Quick Recorder
+# Abi's Quick Recorder
 
-Edición separada de [Lowey Screen Recorder](../README.md), pensada para otro caso de uso: grabar seguido, sin cortes ni esperas.
+Edición separada de [Lowey Screen Recorder](../README.md), pensada para otro caso de uso: grabar seguido, sin cortes ni esperas. Tiene otro nombre a propósito, para no confundirla con la app principal al buscarla.
 
-## En qué se diferencia de Lowey Screen Recorder
+## En qué se diferencia de Lowey Screen Recorder (la app principal)
 
 En la app normal, al cortar una grabación se optimiza automáticamente y hay que esperar a que termine para poder grabar de nuevo. Acá no: apenas cortás, el botón de grabar queda libre al instante y la captura queda esperando en **"Grabaciones sin optimizar"**. Comprimís cuando quieras — una por una, varias juntas, o nunca si no hace falta — sin que eso te frene para seguir grabando.
 
@@ -21,4 +21,4 @@ npm start        # desarrollo
 npm run dist      # generar instalador local
 ```
 
-El instalador de esta edición se publica junto con el de la app principal en la misma sección [Releases](https://github.com/Xyzccords/Lowey-Screen-Recorder/releases) del repositorio, como un `.exe`/`.dmg`/`.AppImage` aparte (`Lowey Quick Recorder Setup X.X.X...`), con su propio desinstalador independiente.
+El instalador de esta edición se publica junto con el de la app principal en la misma sección [Releases](https://github.com/Xyzccords/Lowey-Screen-Recorder/releases) del repositorio, como un `.exe`/`.dmg`/`.AppImage` aparte (`Abi's Quick Recorder Setup X.X.X...`), con su propio desinstalador independiente.
