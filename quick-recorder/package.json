@@ -1,7 +1,7 @@
 {
-  "name": "lowey-screen-recorder",
-  "version": "1.2.1",
-  "description": "Grabador de pantalla y aplicaciones ligero: máxima calidad con el mínimo peso de archivo posible.",
+  "name": "lowey-quick-recorder",
+  "version": "1.0.0",
+  "description": "Grabación instantánea sin esperas: grabá seguido sin cortes, y comprimí cuando quieras desde una cola de pendientes.",
   "main": "main.js",
   "private": true,
   "scripts": {
@@ -17,8 +17,8 @@
     "electron-builder": "^24.13.3"
   },
   "build": {
-    "appId": "com.lowey.screenrecorder",
-    "productName": "Lowey Screen Recorder",
+    "appId": "com.lowey.quickrecorder",
+    "productName": "Lowey Quick Recorder",
     "files": [
       "main.js",
       "preload.js",

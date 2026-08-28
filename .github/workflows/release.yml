@@ -27,10 +27,20 @@ jobs:
         with:
           node-version: 20
 
-      - name: Install dependencies
+      - name: Install dependencies (Lowey Screen Recorder)
         run: npm ci
 
-      - name: Build and publish installer
+      - name: Build and publish installer (Lowey Screen Recorder)
         run: npx electron-builder --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install dependencies (Lowey Quick Recorder)
+        run: npm ci
+        working-directory: quick-recorder
+
+      - name: Build and publish installer (Lowey Quick Recorder)
+        run: npx electron-builder --publish always
+        working-directory: quick-recorder
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

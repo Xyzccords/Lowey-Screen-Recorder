@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';" />
+  <title>Lowey Quick Recorder</title>
+  <style>
+    html, body {
+      margin: 0;
+      height: 100%;
+      background: transparent;
+      overflow: hidden;
+      -webkit-app-region: drag;
+      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+    }
+
+    .pill {
+      height: 100%;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 12px;
+      background: rgba(17, 19, 24, 0.85);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 999px;
+      box-sizing: border-box;
+      color: #e8eaed;
+      font-variant-numeric: tabular-nums;
+      font-size: 13px;
+    }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #e63946;
+      box-shadow: 0 0 0 0 rgba(230, 57, 70, 0.6);
+      animation: pulse 1.4s infinite;
+      flex-shrink: 0;
+    }
+
+    @keyframes pulse {
+      0% { box-shadow: 0 0 0 0 rgba(230, 57, 70, 0.6); }
+      70% { box-shadow: 0 0 0 6px rgba(230, 57, 70, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(230, 57, 70, 0); }
+    }
+  </style>
+</head>
+<body>
+  <div class="pill">
+    <span class="dot"></span>
+    <span id="timer">00:00</span>
+  </div>
+  <script src="floating.js"></script>
+</body>
+</html>

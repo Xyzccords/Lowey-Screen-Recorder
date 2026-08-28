@@ -2,6 +2,8 @@
 
 Grabador de pantalla y aplicaciones para escritorio (Windows, macOS, Linux) pensado para lograr **la máxima calidad posible con el menor peso de archivo**, a diferencia de grabadores como Action! que graban directo a un bitrate fijo alto y generan archivos enormes.
 
+> ¿Necesitás grabar seguido, sin esperar a que se optimice cada video para poder grabar el siguiente? Existe una edición separada para eso: **[Lowey Quick Recorder](quick-recorder/README.md)**, con su propio instalador.
+
 ## Cómo logra "máxima calidad, poco peso"
 
 La mayoría de los grabadores escriben el video final en tiempo real con un bitrate fijo: para no perder calidad usan un bitrate muy alto durante toda la grabación, y eso es lo que infla el tamaño del archivo.
