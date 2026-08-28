@@ -18,12 +18,7 @@ const recDot = document.getElementById('recDot');
 const recTimer = document.getElementById('recTimer');
 const encodeProgressWrap = document.getElementById('encodeProgressWrap');
 const encodeProgress = document.getElementById('encodeProgress');
-const encodeProgressLabel = document.getElementById('encodeProgressLabel');
 const resultBox = document.getElementById('resultBox');
-
-const pendingList = document.getElementById('pendingList');
-const refreshPendingBtn = document.getElementById('refreshPending');
-const compressSelectedBtn = document.getElementById('compressSelectedBtn');
 
 const regionToggle = document.getElementById('regionToggle');
 const chooseRegionBtn = document.getElementById('chooseRegionBtn');
@@ -48,8 +43,7 @@ window.addEventListener('unhandledrejection', (event) => {
 const QUALITY_HINTS = {
   rapidaGpu: 'Usa la placa de video (NVIDIA/Intel/AMD) para codificar en segundos en vez de minutos. Prueba HEVC y H.264 por GPU antes de caer a CPU automáticamente si no hay ninguna compatible.',
   equilibrada: 'H.264, CRF 23. Máxima compatibilidad (WhatsApp, redes, edición), buen balance calidad/peso.',
-  ligera: 'H.264, CRF 28. Prioriza el tamaño de archivo sobre el detalle fino.',
-  targetSize: 'Calcula el bitrate necesario (2 pasadas) para que el archivo entre en ~1GB con la mejor calidad posible para ese tamaño. El audio se copia tal cual, sin recodificar. Tarda más que las otras opciones.'
+  ligera: 'H.264, CRF 28. Prioriza el tamaño de archivo sobre el detalle fino.'
 };
 
 const RESOLUTION_LABELS = {
@@ -70,8 +64,6 @@ let timerInterval = null;
 let recordStart = null;
 let regionRect = null; // { x, y, w, h } como fracciones (0-1) del video capturado
 let regionCleanup = null;
-const pendingAudioMap = new Map(); // tempPath -> tenía audio al grabarse
-let isCompressing = false;
 
 function formatBytes(bytes) {
   if (!bytes) return '0 B';
@@ -83,10 +75,6 @@ function formatBytes(bytes) {
     i += 1;
   }
   return `${value.toFixed(1)} ${units[i]}`;
-}
-
-function formatDate(ms) {
-  return new Date(ms).toLocaleString();
 }
 
 function formatTimer(ms) {
@@ -117,6 +105,16 @@ function playChime() {
     setTimeout(() => ctx.close(), 800);
   } catch (err) {
     console.error('No se pudo reproducir el sonido de aviso:', err);
+  }
+}
+
+function notifyRecordingReady(outputPath, finalSizeBytes) {
+  try {
+    new Notification('Lowey Screen Recorder', {
+      body: `Grabación lista: ${outputPath.split(/[\\/]/).pop()} (${formatBytes(finalSizeBytes)})`
+    });
+  } catch (err) {
+    console.error('No se pudo mostrar la notificación:', err);
   }
 }
 
@@ -191,57 +189,6 @@ async function loadDefaultOutputDir() {
 
 async function loadTempDir() {
   tempDirInput.value = await window.lowey.getTempDir();
-}
-
-async function loadPendingRecordings() {
-  const items = await window.lowey.listPendingRecordings();
-
-  if (items.length === 0) {
-    pendingList.innerHTML = '<p class="pending-empty">No hay grabaciones esperando a optimizarse.</p>';
-    compressSelectedBtn.disabled = true;
-    return;
-  }
-
-  pendingList.innerHTML = '';
-  items.forEach((item) => {
-    const row = document.createElement('div');
-    row.className = 'pending-item';
-    row.dataset.tempPath = item.tempPath;
-
-    const checkbox = document.createElement('input');
-    checkbox.type = 'checkbox';
-    checkbox.className = 'pending-checkbox';
-    checkbox.addEventListener('change', updateCompressButtonState);
-    row.appendChild(checkbox);
-
-    const info = document.createElement('div');
-    info.className = 'pending-info';
-    info.innerHTML = `
-      <div class="pending-name">${formatDate(item.createdAt)}</div>
-      <div class="pending-meta">${formatBytes(item.sizeBytes)} sin optimizar</div>
-    `;
-    row.appendChild(info);
-
-    const discardBtn = document.createElement('button');
-    discardBtn.className = 'ghost-btn';
-    discardBtn.textContent = 'Descartar';
-    discardBtn.addEventListener('click', async () => {
-      if (!confirm('¿Borrar esta captura sin optimizar? No se puede deshacer.')) return;
-      await window.lowey.discardPendingRecording(item.tempPath);
-      pendingAudioMap.delete(item.tempPath);
-      loadPendingRecordings();
-    });
-    row.appendChild(discardBtn);
-
-    pendingList.appendChild(row);
-  });
-
-  updateCompressButtonState();
-}
-
-function updateCompressButtonState() {
-  const anyChecked = !!pendingList.querySelector('.pending-checkbox:checked');
-  compressSelectedBtn.disabled = !anyChecked || isCompressing;
 }
 
 function stopAllStreams() {
@@ -456,110 +403,58 @@ async function onRecordingStopped() {
   stopAllStreams();
   await window.lowey.endWriteStream(recordingId);
 
-  pendingAudioMap.set(tempPath, window.__loweyHasAudio);
-
-  // A diferencia de antes, grabar ya no espera a que se optimice: el botón
-  // queda libre al toque para poder arrancar otra grabación ya mismo. La
-  // captura recién terminada aparece en "Grabaciones sin optimizar" para
-  // comprimirla cuando quieras.
-  recordBtn.disabled = false;
+  recordBtn.disabled = true;
   recordBtn.textContent = '● Iniciar grabación';
   recordBtn.classList.remove('recording');
-  recTimer.textContent = '00:00:00';
-
-  await loadPendingRecordings();
-}
-
-function extractRecordedAt(tempPathValue) {
-  const match = tempPathValue.match(/rec-(\d+)\.webm$/);
-  return match ? Number(match[1]) : Date.now();
-}
-
-async function compressOne(itemTempPath) {
-  const baseName = `Grabacion_${new Date(extractRecordedAt(itemTempPath)).toISOString().replace(/[:.]/g, '-')}`;
-  const keepAudio = pendingAudioMap.has(itemTempPath) ? pendingAudioMap.get(itemTempPath) : true;
-
-  const result = await window.lowey.finishRecording({
-    tempPath: itemTempPath,
-    outputDir,
-    baseName,
-    qualityId: qualitySelect.value,
-    resolutionId: resolutionSelect.value,
-    keepAudio
-  });
-
-  pendingAudioMap.delete(itemTempPath);
-  return result;
-}
-
-compressSelectedBtn.addEventListener('click', async () => {
-  const checkedRows = Array.from(pendingList.querySelectorAll('.pending-checkbox:checked')).map(
-    (cb) => cb.closest('.pending-item').dataset.tempPath
-  );
-  if (checkedRows.length === 0) return;
-
-  isCompressing = true;
-  compressSelectedBtn.disabled = true;
-  resultBox.classList.add('hidden');
   encodeProgressWrap.classList.remove('hidden');
+  encodeProgress.value = 0;
 
   const unsubscribe = window.lowey.onEncodeProgress(({ progress }) => {
     encodeProgress.value = Math.round(progress * 100);
   });
 
-  const results = [];
-  const errors = [];
+  const baseName = `Grabacion_${new Date().toISOString().replace(/[:.]/g, '-')}`;
 
-  for (let i = 0; i < checkedRows.length; i += 1) {
-    encodeProgressLabel.textContent = `Optimizando ${i + 1} de ${checkedRows.length}…`;
-    encodeProgress.value = 0;
-    try {
-      const result = await compressOne(checkedRows[i]);
-      results.push(result);
-    } catch (err) {
-      errors.push(err.message);
-    }
-  }
+  try {
+    const result = await window.lowey.finishRecording({
+      tempPath,
+      outputDir,
+      baseName,
+      qualityId: qualitySelect.value,
+      resolutionId: resolutionSelect.value,
+      keepAudio: window.__loweyHasAudio
+    });
 
-  unsubscribe();
-  encodeProgressWrap.classList.add('hidden');
-  encodeProgressLabel.textContent = 'Optimizando video (compresión de alta calidad)…';
-  isCompressing = false;
+    const savedPercent = result.tempSizeBytes
+      ? Math.round((1 - result.finalSizeBytes / result.tempSizeBytes) * 100)
+      : 0;
 
-  resultBox.classList.remove('hidden');
-  resultBox.innerHTML = results
-    .map((result) => {
-      const savedPercent = result.tempSizeBytes
-        ? Math.round((1 - result.finalSizeBytes / result.tempSizeBytes) * 100)
-        : 0;
-      return `
-        <div style="margin-bottom:10px;">
-          <div>Archivo final: <strong>${result.outputPath}</strong></div>
-          <div>Tamaño final: ${formatBytes(result.finalSizeBytes)}</div>
-          ${result.encoderUsed ? `<div>Codificado con: ${result.encoderUsed}</div>` : ''}
-          ${savedPercent > 0 ? `<div class="saving">Ahorro por recompresión: ${savedPercent}%</div>` : ''}
-        </div>
-      `;
-    })
-    .join('') + (errors.length ? `<div>Errores: ${errors.join(' · ')}</div>` : '');
+    resultBox.classList.remove('hidden');
+    resultBox.innerHTML = `
+      <div>Archivo final: <strong>${result.outputPath}</strong></div>
+      <div>Tamaño final: ${formatBytes(result.finalSizeBytes)}</div>
+      <div>Captura intermedia: ${formatBytes(result.tempSizeBytes)}</div>
+      ${result.encoderUsed ? `<div>Codificado con: ${result.encoderUsed}</div>` : ''}
+      ${savedPercent > 0 ? `<div class="saving">Ahorro por recompresión: ${savedPercent}%</div>` : ''}
+      <div style="margin-top:8px;"><button id="openFolderBtn" class="ghost-btn">Abrir carpeta</button></div>
+    `;
 
-  if (results.length > 0) {
+    document.getElementById('openFolderBtn').addEventListener('click', () => {
+      window.lowey.showInFolder(result.outputPath);
+    });
+
     playChime();
-    try {
-      new Notification('Lowey Screen Recorder', {
-        body: results.length === 1
-          ? `Grabación lista: ${results[0].outputPath.split(/[\\/]/).pop()} (${formatBytes(results[0].finalSizeBytes)})`
-          : `${results.length} grabaciones optimizadas.`
-      });
-    } catch (err) {
-      console.error('No se pudo mostrar la notificación:', err);
-    }
+    notifyRecordingReady(result.outputPath, result.finalSizeBytes);
+  } catch (err) {
+    resultBox.classList.remove('hidden');
+    resultBox.textContent = `Error al optimizar el video: ${err.message}`;
+  } finally {
+    unsubscribe();
+    encodeProgressWrap.classList.add('hidden');
+    recordBtn.disabled = false;
+    recTimer.textContent = '00:00:00';
   }
-
-  await loadPendingRecordings();
-});
-
-refreshPendingBtn.addEventListener('click', loadPendingRecordings);
+}
 
 function toggleRecording() {
   if (mediaRecorder && mediaRecorder.state === 'recording') {
@@ -699,4 +594,3 @@ loadResolutionOptions();
 loadDefaultOutputDir();
 loadTempDir();
 loadShortcutHint();
-loadPendingRecordings();
