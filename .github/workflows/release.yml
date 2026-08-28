@@ -35,11 +35,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install dependencies (Lowey Quick Recorder)
+      - name: Install dependencies (Abi's Quick Recorder)
         run: npm ci
         working-directory: quick-recorder
 
-      - name: Build and publish installer (Lowey Quick Recorder)
+      - name: Build and publish installer (Abi's Quick Recorder)
         run: npx electron-builder --publish always
         working-directory: quick-recorder
         env:
