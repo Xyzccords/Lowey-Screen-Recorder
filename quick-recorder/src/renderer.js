@@ -49,7 +49,7 @@ const QUALITY_HINTS = {
   rapidaGpu: 'Usa la placa de video (NVIDIA/Intel/AMD) para codificar en segundos en vez de minutos. Prueba HEVC y H.264 por GPU antes de caer a CPU automáticamente si no hay ninguna compatible.',
   equilibrada: 'H.264, CRF 23. Máxima compatibilidad (WhatsApp, redes, edición), buen balance calidad/peso.',
   ligera: 'H.264, CRF 28. Prioriza el tamaño de archivo sobre el detalle fino.',
-  targetSize: 'Calcula el bitrate necesario (2 pasadas) para que el archivo entre en ~1GB con la mejor calidad posible para ese tamaño. El audio se copia tal cual, sin recodificar. Tarda más que las otras opciones.'
+  hevcAudioIntacto: 'H.265, CRF 22, una sola pasada. Igual de simple que comprimir a mano con ffmpeg. El audio se copia tal cual, sin recodificar.'
 };
 
 const RESOLUTION_LABELS = {
@@ -71,7 +71,6 @@ let recordStart = null;
 let regionRect = null; // { x, y, w, h } como fracciones (0-1) del video capturado
 let regionCleanup = null;
 const pendingAudioMap = new Map(); // tempPath -> tenía audio al grabarse
-const pendingDurationMap = new Map(); // tempPath -> duración real medida por el cronómetro (segundos)
 let isCompressing = false;
 
 function formatBytes(bytes) {
@@ -230,7 +229,6 @@ async function loadPendingRecordings() {
       if (!confirm('¿Borrar esta captura sin optimizar? No se puede deshacer.')) return;
       await window.lowey.discardPendingRecording(item.tempPath);
       pendingAudioMap.delete(item.tempPath);
-      pendingDurationMap.delete(item.tempPath);
       loadPendingRecordings();
     });
     row.appendChild(discardBtn);
@@ -459,7 +457,6 @@ async function onRecordingStopped() {
   await window.lowey.endWriteStream(recordingId);
 
   pendingAudioMap.set(tempPath, window.__loweyHasAudio);
-  pendingDurationMap.set(tempPath, (Date.now() - recordStart) / 1000);
 
   // A diferencia de antes, grabar ya no espera a que se optimice: el botón
   // queda libre al toque para poder arrancar otra grabación ya mismo. La
@@ -488,12 +485,10 @@ async function compressOne(itemTempPath) {
     baseName,
     qualityId: qualitySelect.value,
     resolutionId: resolutionSelect.value,
-    keepAudio,
-    durationSecondsHint: pendingDurationMap.get(itemTempPath) || null
+    keepAudio
   });
 
   pendingAudioMap.delete(itemTempPath);
-  pendingDurationMap.delete(itemTempPath);
   return result;
 }
 

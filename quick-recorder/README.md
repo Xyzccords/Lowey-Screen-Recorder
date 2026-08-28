@@ -6,7 +6,7 @@ Edición separada de [Lowey Screen Recorder](../README.md), pensada para otro ca
 
 En la app normal, al cortar una grabación se optimiza automáticamente y hay que esperar a que termine para poder grabar de nuevo. Acá no: apenas cortás, el botón de grabar queda libre al instante y la captura queda esperando en **"Grabaciones sin optimizar"**. Comprimís cuando quieras — una por una, varias juntas, o nunca si no hace falta — sin que eso te frene para seguir grabando.
 
-También suma un perfil de calidad extra, **"Tamaño objetivo (~1GB, audio intacto)"**: calcula (con dos pasadas de `ffmpeg`) el bitrate justo para que el video entre en ~1GB con la mejor calidad posible para ese tamaño, sin recodificar el audio.
+También suma un perfil de calidad extra, **"Alta calidad HEVC (audio intacto)"**: una sola pasada con `ffmpeg` a H.265 CRF 22 (lo mismo que hacer `ffmpeg -c:v libx265 -crf 22 -c:a copy` a mano), sin recodificar el audio.
 
 Todo lo demás (fuentes de captura, región, modos de captura, resolución de salida, atajo de teclado, indicador flotante, carpeta temporal configurable) funciona igual que en la app normal. El atajo de teclado por defecto es **F10** en vez de F9, para poder tener las dos apps instaladas sin que se pisen los atajos.
 

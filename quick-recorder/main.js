@@ -48,12 +48,11 @@ const QUALITY_PRESETS = {
   rapidaGpu: { gpu: true, label: 'Rápida (GPU)' },
   equilibrada: { codec: 'libx264', crf: 23, preset: 'medium', label: 'Equilibrada (H.264 CRF 23)' },
   ligera: { codec: 'libx264', crf: 28, preset: 'faster', label: 'Ligera (H.264 CRF 28)' },
-  // Encoder a 2 pasadas calculando el bitrate necesario para llegar a un
-  // tamaño de archivo elegido, en vez de a una calidad fija (CRF). Es lo que
-  // conviene cuando lo que importa es "que entre en ~1GB con la mejor calidad
-  // posible", en vez de "esta calidad, pese lo que pese". El audio se copia
-  // tal cual (sin recodificar) para no perder nada ahí.
-  targetSize: { targetSize: true, targetSizeMB: 1100, label: 'Tamaño objetivo (~1GB, audio intacto)' }
+  // Una sola pasada, CRF fijo (calidad constante) en vez de calcular un
+  // bitrate a partir de la duración: más simple, más rápido y sin depender
+  // de nada que se pueda leer mal de la duración del archivo. El audio se
+  // copia tal cual (sin recodificar) para no perder nada ahí.
+  hevcAudioIntacto: { codec: 'libx265', crf: 22, preset: 'medium', tag: 'hvc1', copyAudio: true, label: 'Alta calidad HEVC (audio intacto)' }
 };
 
 // Salidas de resolución disponibles para achicar el peso final independiente
@@ -367,22 +366,7 @@ function runFfmpeg(args, { progressOffset = 0, progressScale = 1 } = {}) {
   });
 }
 
-// Duración vía la propia cabecera que ffmpeg imprime al abrir el archivo
-// (no decodifica nada, es casi instantáneo). No se pide un output, así que
-// siempre termina con código de salida distinto de 0: eso es esperado acá.
-function probeDurationSeconds(filePath) {
-  return new Promise((resolve) => {
-    const ff = spawn(ffmpegPath, ['-i', filePath, '-hide_banner']);
-    let stderrBuffer = '';
-    ff.stderr.on('data', (data) => {
-      stderrBuffer += data.toString();
-    });
-    ff.on('error', () => resolve(null));
-    ff.on('close', () => resolve(parseDurationSeconds(stderrBuffer)));
-  });
-}
-
-ipcMain.handle('finish-recording', async (event, { tempPath, outputDir, baseName, qualityId, keepAudio, resolutionId, durationSecondsHint }) => {
+ipcMain.handle('finish-recording', async (event, { tempPath, outputDir, baseName, qualityId, keepAudio, resolutionId }) => {
   const preset = QUALITY_PRESETS[qualityId] || QUALITY_PRESETS.equilibrada;
   fs.mkdirSync(outputDir, { recursive: true });
   const outputPath = path.join(outputDir, `${baseName}.mp4`);
@@ -390,46 +374,15 @@ ipcMain.handle('finish-recording', async (event, { tempPath, outputDir, baseName
   const targetHeight = RESOLUTION_HEIGHTS[resolutionId] || null;
   const scaleArgs = targetHeight ? ['-vf', `scale=-2:${targetHeight}`] : [];
 
-  const audioArgs = keepAudio ? ['-c:a', 'aac', '-b:a', '160k'] : ['-an'];
+  const audioArgs = keepAudio
+    ? (preset.copyAudio ? ['-c:a', 'copy'] : ['-c:a', 'aac', '-b:a', '160k'])
+    : ['-an'];
   const trailingArgs = ['-pix_fmt', 'yuv420p', ...audioArgs, '-movflags', '+faststart', outputPath];
 
   const encode = (encoderArgs) => runFfmpeg(['-y', '-i', tempPath, ...scaleArgs, ...encoderArgs, ...trailingArgs]);
 
   let encoderUsed;
-  if (preset.targetSize) {
-    // La duración real (medida por el propio cronómetro de la grabación) es
-    // muchísimo más confiable que leerla del archivo: en WebM grandes/largos
-    // ffmpeg puede reportar una duración de cabecera mucho más corta que la
-    // real, lo que dispara un bitrate carísimo y un archivo final gigante.
-    // Si no la tenemos (p. ej. quedó pendiente de una sesión anterior), se
-    // sobreestima a propósito (1 hora) en vez de subestimar: quedarse corto
-    // de tamaño es un problema mucho menor que un archivo que explota.
-    const durationSeconds = durationSecondsHint || (await probeDurationSeconds(tempPath)) || 3600;
-    const targetBytes = preset.targetSizeMB * 1024 * 1024;
-    const audioBitrateBps = keepAudio ? 256_000 : 0;
-    // 2% de margen para el overhead del contenedor, para no pasarse del objetivo.
-    let videoBitrateBps = Math.floor(((targetBytes * 8) / durationSeconds) * 0.98) - audioBitrateBps;
-    videoBitrateBps = Math.max(videoBitrateBps, 300_000);
-
-    const passLogFile = path.join(os.tmpdir(), `ffmpeg2pass-${Date.now()}`);
-    const videoArgs = ['-c:v', 'libx265', '-b:v', String(videoBitrateBps), '-tag:v', 'hvc1'];
-    const audioArgs = keepAudio ? ['-c:a', 'copy'] : ['-an'];
-
-    try {
-      await runFfmpeg(
-        ['-y', '-i', tempPath, ...scaleArgs, ...videoArgs, '-pass', '1', '-passlogfile', passLogFile, '-an', '-f', 'null', '-'],
-        { progressScale: 0.5 }
-      );
-      await runFfmpeg(
-        ['-y', '-i', tempPath, ...scaleArgs, ...videoArgs, '-pass', '2', '-passlogfile', passLogFile, ...audioArgs, '-pix_fmt', 'yuv420p', '-movflags', '+faststart', outputPath],
-        { progressOffset: 0.5, progressScale: 0.5 }
-      );
-    } finally {
-      fs.unlink(`${passLogFile}-0.log`, () => {});
-      fs.unlink(`${passLogFile}-0.log.mbtree`, () => {});
-    }
-    encoderUsed = 'CPU, 2 pasadas (tamaño objetivo, audio sin recodificar)';
-  } else if (preset.gpu) {
+  if (preset.gpu) {
     let succeeded = false;
     for (const encoder of GPU_ENCODERS) {
       try {

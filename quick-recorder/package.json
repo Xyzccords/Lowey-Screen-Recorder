@@ -1,6 +1,6 @@
 {
   "name": "abis-quick-recorder",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Grabación instantánea sin esperas: grabá seguido sin cortes, y comprimí cuando quieras desde una cola de pendientes.",
   "main": "main.js",
   "private": true,
