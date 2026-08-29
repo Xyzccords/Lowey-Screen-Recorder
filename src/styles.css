@@ -221,6 +221,15 @@ main {
   border-color: #444a58;
 }
 
+.ghost-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.ghost-btn:disabled:hover {
+  border-color: var(--border);
+}
+
 .record-btn {
   width: 100%;
   padding: 12px;

@@ -41,14 +41,10 @@ function getTempDir() {
   return settings.tempDir && fs.existsSync(settings.tempDir) ? settings.tempDir : os.tmpdir();
 }
 
-// Presets de recompresión: usan CRF (calidad constante) en vez de bitrate fijo,
-// que es lo que permite lograr "misma calidad, menos peso" frente a grabadores
-// que graban directo a un bitrate alto durante toda la sesión.
+// Un solo preset de recompresión: una pasada, CRF fijo (calidad constante),
+// audio copiado tal cual (sin recodificar). Se sacaron las demás opciones
+// (GPU y otros CRF) porque en la práctica solo hacía falta esta.
 const QUALITY_PRESETS = {
-  rapidaGpu: { gpu: true, label: 'Rápida (GPU)' },
-  equilibrada: { codec: 'libx264', crf: 23, preset: 'medium', label: 'Equilibrada (H.264 CRF 23)' },
-  ligera: { codec: 'libx264', crf: 28, preset: 'faster', label: 'Ligera (H.264 CRF 28)' },
-  // Una sola pasada, CRF fijo, audio copiado tal cual (sin recodificar).
   hevcAudioIntacto: { codec: 'libx265', crf: 22, preset: 'medium', tag: 'hvc1', copyAudio: true, label: 'Alta calidad HEVC (audio intacto)' }
 };
 
@@ -61,18 +57,6 @@ const RESOLUTION_HEIGHTS = {
   '720p': 720,
   '480p': 480
 };
-
-// Se prueban en este orden porque no sabemos de antemano qué GPU tiene el
-// usuario; cada intento falla casi al instante si esa marca no está presente,
-// así que probarlas todas es barato. HEVC va primero porque pesa bastante
-// menos que H.264 en las GPU que lo soportan bien (NVIDIA Turing/GTX 16xx en
-// adelante); si falla, se prueba H.264 por GPU y por último se cae a CPU.
-const GPU_ENCODERS = [
-  { name: 'NVIDIA (NVENC HEVC)', args: ['-c:v', 'hevc_nvenc', '-preset', 'p6', '-rc', 'vbr', '-cq', '25', '-b:v', '0', '-tag:v', 'hvc1'] },
-  { name: 'NVIDIA (NVENC H.264)', args: ['-c:v', 'h264_nvenc', '-preset', 'p6', '-rc', 'vbr', '-cq', '25', '-b:v', '0'] },
-  { name: 'Intel (Quick Sync)', args: ['-c:v', 'h264_qsv', '-global_quality', '25'] },
-  { name: 'AMD (AMF)', args: ['-c:v', 'h264_amf', '-rc', 'cqp', '-qp_i', '25', '-qp_p', '25'] }
-];
 
 let mainWindow;
 let floatingWindow;
@@ -322,13 +306,6 @@ function parseDurationSeconds(text) {
   return Number(h) * 3600 + Number(m) * 60 + Number(s);
 }
 
-function parseTimeSeconds(text) {
-  const match = text.match(/time=(\d+):(\d+):(\d+\.\d+)/);
-  if (!match) return null;
-  const [, h, m, s] = match;
-  return Number(h) * 3600 + Number(m) * 60 + Number(s);
-}
-
 function runFfmpeg(args) {
   return new Promise((resolve, reject) => {
     const ff = spawn(ffmpegPath, args);
@@ -336,18 +313,24 @@ function runFfmpeg(args) {
     let stderrBuffer = '';
 
     ff.stderr.on('data', (data) => {
-      const text = data.toString();
-      stderrBuffer += text;
+      stderrBuffer += data.toString();
 
       if (totalDuration === null) {
         const d = parseDurationSeconds(stderrBuffer);
         if (d) totalDuration = d;
       }
 
-      const t = parseTimeSeconds(text);
-      if (t !== null && totalDuration) {
-        const progress = Math.min(1, t / totalDuration);
-        mainWindow.webContents.send('encode-progress', { progress });
+      // Se busca la ÚLTIMA aparición de "time=" en todo el buffer acumulado
+      // (no solo en este pedacito) para no perder actualizaciones si un
+      // "time=..." queda partido justo entre dos chunks del stream.
+      if (totalDuration) {
+        const matches = [...stderrBuffer.matchAll(/time=(\d+):(\d+):(\d+\.\d+)/g)];
+        if (matches.length > 0) {
+          const [, h, m, s] = matches[matches.length - 1];
+          const t = Number(h) * 3600 + Number(m) * 60 + Number(s);
+          const progress = Math.min(1, t / totalDuration);
+          mainWindow.webContents.send('encode-progress', { progress });
+        }
       }
     });
 
@@ -364,7 +347,7 @@ function runFfmpeg(args) {
 }
 
 ipcMain.handle('finish-recording', async (event, { tempPath, outputDir, baseName, qualityId, keepAudio, resolutionId }) => {
-  const preset = QUALITY_PRESETS[qualityId] || QUALITY_PRESETS.equilibrada;
+  const preset = QUALITY_PRESETS[qualityId] || QUALITY_PRESETS.hevcAudioIntacto;
   fs.mkdirSync(outputDir, { recursive: true });
   const outputPath = path.join(outputDir, `${baseName}.mp4`);
 
@@ -378,30 +361,10 @@ ipcMain.handle('finish-recording', async (event, { tempPath, outputDir, baseName
 
   const encode = (encoderArgs) => runFfmpeg(['-y', '-i', tempPath, ...scaleArgs, ...encoderArgs, ...trailingArgs]);
 
-  let encoderUsed;
-  if (preset.gpu) {
-    let succeeded = false;
-    for (const encoder of GPU_ENCODERS) {
-      try {
-        await encode(encoder.args);
-        encoderUsed = encoder.name;
-        succeeded = true;
-        break;
-      } catch (err) {
-        // Esta GPU/encoder no está disponible en esta máquina: probar la siguiente.
-      }
-    }
-    if (!succeeded) {
-      const cpuFallback = QUALITY_PRESETS.equilibrada;
-      await encode(['-c:v', cpuFallback.codec, '-crf', String(cpuFallback.crf), '-preset', cpuFallback.preset]);
-      encoderUsed = 'CPU (ninguna GPU compatible encontrada)';
-    }
-  } else {
-    const encoderArgs = ['-c:v', preset.codec, '-crf', String(preset.crf), '-preset', preset.preset];
-    if (preset.tag) encoderArgs.push('-tag:v', preset.tag);
-    await encode(encoderArgs);
-    encoderUsed = 'CPU';
-  }
+  const encoderArgs = ['-c:v', preset.codec, '-crf', String(preset.crf), '-preset', preset.preset];
+  if (preset.tag) encoderArgs.push('-tag:v', preset.tag);
+  await encode(encoderArgs);
+  const encoderUsed = 'CPU';
 
   const tempSize = fs.existsSync(tempPath) ? fs.statSync(tempPath).size : 0;
   const finalSize = fs.existsSync(outputPath) ? fs.statSync(outputPath).size : 0;

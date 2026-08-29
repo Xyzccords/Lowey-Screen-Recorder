@@ -1,7 +1,5 @@
 const sourcesGrid = document.getElementById('sourcesGrid');
 const refreshSourcesBtn = document.getElementById('refreshSources');
-const qualitySelect = document.getElementById('qualitySelect');
-const qualityHint = document.getElementById('qualityHint');
 const resolutionSelect = document.getElementById('resolutionSelect');
 const captureModeSelect = document.getElementById('captureModeSelect');
 const captureModeInfoBtn = document.getElementById('captureModeInfoBtn');
@@ -47,13 +45,6 @@ window.addEventListener('unhandledrejection', (event) => {
   console.error('Promesa rechazada sin manejar:', event.reason);
   alert(`Ocurrió un error: ${event.reason && event.reason.message ? event.reason.message : event.reason}`);
 });
-
-const QUALITY_HINTS = {
-  rapidaGpu: 'Usa la placa de video (NVIDIA/Intel/AMD) para codificar en segundos en vez de minutos. Prueba HEVC y H.264 por GPU antes de caer a CPU automáticamente si no hay ninguna compatible.',
-  equilibrada: 'H.264, CRF 23. Máxima compatibilidad (WhatsApp, redes, edición), buen balance calidad/peso.',
-  ligera: 'H.264, CRF 28. Prioriza el tamaño de archivo sobre el detalle fino.',
-  hevcAudioIntacto: 'H.265, CRF 22, una sola pasada. El audio se copia tal cual, sin recodificar.'
-};
 
 const MODE_NAMES = {
   normal: 'Lowey Screen Recorder',
@@ -175,28 +166,11 @@ async function loadSources() {
       selectedSourceId = source.id;
       document.querySelectorAll('.source-card').forEach((c) => c.classList.remove('selected'));
       card.classList.add('selected');
-      chooseRegionBtn.disabled = !regionToggle.checked;
+      updateRegionButtonState();
     });
 
     sourcesGrid.appendChild(card);
   });
-}
-
-async function loadQualityPresets() {
-  const presets = await window.lowey.getQualityPresets();
-  qualitySelect.innerHTML = '';
-  presets.forEach((preset) => {
-    const option = document.createElement('option');
-    option.value = preset.id;
-    option.textContent = preset.label;
-    qualitySelect.appendChild(option);
-  });
-  qualitySelect.value = 'rapidaGpu';
-  updateQualityHint();
-}
-
-function updateQualityHint() {
-  qualityHint.textContent = QUALITY_HINTS[qualitySelect.value] || '';
 }
 
 async function loadResolutionOptions() {
@@ -288,7 +262,7 @@ async function compressOne(itemTempPath) {
     tempPath: itemTempPath,
     outputDir,
     baseName,
-    qualityId: qualitySelect.value,
+    qualityId: 'hevcAudioIntacto',
     resolutionId: resolutionSelect.value,
     keepAudio
   });
@@ -537,8 +511,8 @@ async function startRecording() {
   // eso lo resuelve la recompresión posterior).
   const isLowImpact = captureModeSelect.value === 'liviano';
   const videoBitsPerSecond = isLowImpact
-    ? (fps >= 60 ? 12_000_000 : 8_000_000)
-    : (fps >= 60 ? 60_000_000 : 40_000_000);
+    ? (fps >= 60 ? 5_000_000 : 4_000_000)
+    : (fps >= 60 ? 9_000_000 : 7_000_000);
 
   mediaRecorder = new MediaRecorder(captured.stream, {
     mimeType: pickMimeType(),
@@ -605,7 +579,7 @@ async function onRecordingStopped() {
       tempPath,
       outputDir,
       baseName,
-      qualityId: qualitySelect.value,
+      qualityId: 'hevcAudioIntacto',
       resolutionId: resolutionSelect.value,
       keepAudio: window.__loweyHasAudio
     });
@@ -653,7 +627,6 @@ recordBtn.addEventListener('click', toggleRecording);
 window.lowey.onToggleRecordingShortcut(toggleRecording);
 
 refreshSourcesBtn.addEventListener('click', loadSources);
-qualitySelect.addEventListener('change', updateQualityHint);
 
 captureModeInfoBtn.addEventListener('click', () => {
   captureModeInfo.classList.toggle('hidden');
@@ -687,8 +660,12 @@ async function loadShortcutHint() {
 
 // --- Selección de región ---
 
-regionToggle.addEventListener('change', () => {
+function updateRegionButtonState() {
   chooseRegionBtn.disabled = !regionToggle.checked || !selectedSourceId;
+}
+
+regionToggle.addEventListener('change', () => {
+  updateRegionButtonState();
   if (!regionToggle.checked) {
     regionRect = null;
     regionHint.textContent = '';
@@ -706,14 +683,24 @@ function resetSelectionBox() {
 
 chooseRegionBtn.addEventListener('click', async () => {
   if (!selectedSourceId) return;
-  const dataUrl = await window.lowey.getSourcePreview(selectedSourceId);
-  if (!dataUrl) {
-    alert('No se pudo generar la vista previa de esta fuente.');
-    return;
+  const originalText = chooseRegionBtn.textContent;
+  chooseRegionBtn.disabled = true;
+  chooseRegionBtn.textContent = 'Cargando…';
+  try {
+    const dataUrl = await window.lowey.getSourcePreview(selectedSourceId);
+    if (!dataUrl) {
+      alert('No se pudo generar la vista previa de esta fuente.');
+      return;
+    }
+    regionPreviewImg.src = dataUrl;
+    resetSelectionBox();
+    regionModal.classList.remove('hidden');
+  } catch (err) {
+    alert(`No se pudo abrir la selección de región: ${err.message}`);
+  } finally {
+    chooseRegionBtn.disabled = false;
+    chooseRegionBtn.textContent = originalText;
   }
-  regionPreviewImg.src = dataUrl;
-  resetSelectionBox();
-  regionModal.classList.remove('hidden');
 });
 
 regionPreviewWrap.addEventListener('mousedown', (event) => {
@@ -774,7 +761,6 @@ regionCancelBtn.addEventListener('click', () => {
 });
 
 loadSources();
-loadQualityPresets();
 loadResolutionOptions();
 loadDefaultOutputDir();
 loadTempDir();
