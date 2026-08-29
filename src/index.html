@@ -29,15 +29,6 @@
       </div>
       <div id="sourcesGrid" class="sources-grid"></div>
 
-      <div class="region-row">
-        <label class="checkbox-field">
-          <input type="checkbox" id="regionToggle" />
-          <span>Grabar solo una región de la pantalla</span>
-        </label>
-        <button id="chooseRegionBtn" class="ghost-btn" disabled>Elegir región…</button>
-      </div>
-      <small id="regionHint" class="hint"></small>
-
       <div id="pendingSection" class="hidden">
         <div class="panel-title pending-title">
           <h2>Grabaciones sin optimizar</h2>
@@ -120,21 +111,6 @@
       <div id="resultBox" class="result-box hidden"></div>
     </section>
   </main>
-
-  <div id="regionModal" class="modal-overlay hidden">
-    <div class="modal-box">
-      <h2>Elegí la región a grabar</h2>
-      <p class="hint">Arrastrá un rectángulo sobre la vista previa.</p>
-      <div id="regionPreviewWrap" class="region-preview-wrap">
-        <img id="regionPreviewImg" alt="Vista previa" />
-        <div id="regionSelectionBox" class="region-selection-box hidden"></div>
-      </div>
-      <div class="modal-actions">
-        <button id="regionCancelBtn" class="ghost-btn">Cancelar</button>
-        <button id="regionConfirmBtn" class="record-btn" disabled>Usar esta región</button>
-      </div>
-    </div>
-  </div>
 
   <script src="renderer.js"></script>
 </body>

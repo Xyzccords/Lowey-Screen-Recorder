@@ -26,16 +26,6 @@ const pendingList = document.getElementById('pendingList');
 const refreshPendingBtn = document.getElementById('refreshPending');
 const compressSelectedBtn = document.getElementById('compressSelectedBtn');
 
-const regionToggle = document.getElementById('regionToggle');
-const chooseRegionBtn = document.getElementById('chooseRegionBtn');
-const regionHint = document.getElementById('regionHint');
-const regionModal = document.getElementById('regionModal');
-const regionPreviewWrap = document.getElementById('regionPreviewWrap');
-const regionPreviewImg = document.getElementById('regionPreviewImg');
-const regionSelectionBox = document.getElementById('regionSelectionBox');
-const regionCancelBtn = document.getElementById('regionCancelBtn');
-const regionConfirmBtn = document.getElementById('regionConfirmBtn');
-
 window.addEventListener('error', (event) => {
   console.error('Error en la interfaz:', event.error || event.message);
   alert(`Ocurrió un error: ${event.message}`);
@@ -63,15 +53,15 @@ const RESOLUTION_LABELS = {
 let selectedSourceId = null;
 let outputDir = null;
 let mediaRecorder = null;
+let isStarting = false; // evita iniciar dos capturas si F9 se aprieta dos veces muy rápido
 let activeStreams = [];
 let audioContext = null;
 let recordingId = null;
 let tempPath = null;
 let timerInterval = null;
 let recordStart = null;
-let regionRect = null; // { x, y, w, h } como fracciones (0-1) del video capturado
-let regionCleanup = null;
 const pendingAudioMap = new Map(); // tempPath -> tenía audio al grabarse
+const pendingDurationMap = new Map(); // tempPath -> duración real grabada, en segundos
 
 function formatBytes(bytes) {
   if (!bytes) return '0 B';
@@ -118,8 +108,12 @@ function playChime() {
 
 function notifyRecordingReady(outputPath, finalSizeBytes) {
   try {
+    // silent: true porque ya reproducimos nuestro propio sonido con
+    // playChime(); si no, Windows suma su sonido de notificación por
+    // encima del nuestro y se escuchan los dos superpuestos.
     new Notification(MODE_NAMES[currentMode], {
-      body: `Grabación lista: ${outputPath.split(/[\\/]/).pop()} (${formatBytes(finalSizeBytes)})`
+      body: `Grabación lista: ${outputPath.split(/[\\/]/).pop()} (${formatBytes(finalSizeBytes)})`,
+      silent: true
     });
   } catch (err) {
     console.error('No se pudo mostrar la notificación:', err);
@@ -159,14 +153,9 @@ async function loadSources() {
     card.appendChild(name);
 
     card.addEventListener('click', () => {
-      if (selectedSourceId !== source.id) {
-        regionRect = null;
-        regionHint.textContent = '';
-      }
       selectedSourceId = source.id;
       document.querySelectorAll('.source-card').forEach((c) => c.classList.remove('selected'));
       card.classList.add('selected');
-      updateRegionButtonState();
     });
 
     sourcesGrid.appendChild(card);
@@ -234,6 +223,7 @@ async function loadPendingRecordings() {
       if (!confirm('¿Borrar esta captura sin optimizar? No se puede deshacer.')) return;
       await window.lowey.discardPendingRecording(item.tempPath);
       pendingAudioMap.delete(item.tempPath);
+      pendingDurationMap.delete(item.tempPath);
       loadPendingRecordings();
     });
     row.appendChild(discardBtn);
@@ -257,6 +247,10 @@ function extractRecordedAt(tempPathValue) {
 async function compressOne(itemTempPath) {
   const baseName = `Grabacion_${new Date(extractRecordedAt(itemTempPath)).toISOString().replace(/[:.]/g, '-')}`;
   const keepAudio = pendingAudioMap.has(itemTempPath) ? pendingAudioMap.get(itemTempPath) : true;
+  // Solo se conoce si esta pending quedó de esta misma sesión (se trackea en
+  // vivo con Date.now()); si el programa se reinició y la captura ya estaba
+  // en la carpeta temporal de antes, no hay forma de saber cuánto duró.
+  const durationSeconds = pendingDurationMap.get(itemTempPath);
 
   const result = await window.lowey.finishRecording({
     tempPath: itemTempPath,
@@ -264,10 +258,12 @@ async function compressOne(itemTempPath) {
     baseName,
     qualityId: 'hevcAudioIntacto',
     resolutionId: resolutionSelect.value,
-    keepAudio
+    keepAudio,
+    durationSeconds
   });
 
   pendingAudioMap.delete(itemTempPath);
+  pendingDurationMap.delete(itemTempPath);
   return result;
 }
 
@@ -326,7 +322,8 @@ compressSelectedBtn.addEventListener('click', async () => {
       new Notification(MODE_NAMES[currentMode], {
         body: results.length === 1
           ? `Grabación lista: ${results[0].outputPath.split(/[\\/]/).pop()} (${formatBytes(results[0].finalSizeBytes)})`
-          : `${results.length} grabaciones optimizadas.`
+          : `${results.length} grabaciones optimizadas.`,
+        silent: true
       });
     } catch (err) {
       console.error('No se pudo mostrar la notificación:', err);
@@ -345,55 +342,6 @@ function stopAllStreams() {
     audioContext.close();
     audioContext = null;
   }
-  if (regionCleanup) {
-    regionCleanup();
-    regionCleanup = null;
-  }
-}
-
-// Recorta el video capturado a la región elegida dibujando cuadro a cuadro en
-// un canvas oculto. Se usa setInterval (no requestAnimationFrame) para que
-// siga grabando aunque la ventana no tenga foco ni esté visible.
-function applyRegionCrop(videoTrack, fps, rect) {
-  const settings = videoTrack.getSettings();
-  const nativeW = settings.width || 1920;
-  const nativeH = settings.height || 1080;
-
-  const even = (n) => Math.max(2, Math.round(n / 2) * 2);
-  const sx = Math.round(rect.x * nativeW);
-  const sy = Math.round(rect.y * nativeH);
-  const sw = even(rect.w * nativeW);
-  const sh = even(rect.h * nativeH);
-
-  const video = document.createElement('video');
-  video.muted = true;
-  video.style.position = 'fixed';
-  video.style.left = '-9999px';
-  video.srcObject = new MediaStream([videoTrack]);
-  document.body.appendChild(video);
-  video.play().catch(() => {});
-
-  const canvas = document.createElement('canvas');
-  canvas.width = sw;
-  canvas.height = sh;
-  const ctx = canvas.getContext('2d');
-
-  const intervalId = setInterval(() => {
-    if (video.readyState >= 2) {
-      ctx.drawImage(video, sx, sy, sw, sh, 0, 0, sw, sh);
-    }
-  }, 1000 / fps);
-
-  const canvasStream = canvas.captureStream(fps);
-
-  regionCleanup = () => {
-    clearInterval(intervalId);
-    video.pause();
-    video.srcObject = null;
-    video.remove();
-  };
-
-  return canvasStream.getVideoTracks()[0];
 }
 
 async function buildCaptureStream(sourceId, fps, wantMic, wantSystemAudio) {
@@ -446,11 +394,7 @@ async function buildCaptureStream(sourceId, fps, wantMic, wantSystemAudio) {
   }
 
   const combined = new MediaStream();
-  if (regionRect) {
-    combined.addTrack(applyRegionCrop(videoStream.getVideoTracks()[0], fps, regionRect));
-  } else {
-    videoStream.getVideoTracks().forEach((track) => combined.addTrack(track));
-  }
+  videoStream.getVideoTracks().forEach((track) => combined.addTrack(track));
 
   const audioSources = [desktopAudioStream, micStream].filter(Boolean);
   if (audioSources.length === 1) {
@@ -484,6 +428,8 @@ async function startRecording() {
     return;
   }
 
+  isStarting = true;
+
   resultBox.classList.add('hidden');
   encodeProgressWrap.classList.add('hidden');
 
@@ -496,6 +442,7 @@ async function startRecording() {
     captured = await buildCaptureStream(selectedSourceId, fps, wantMic, wantSystemAudio);
   } catch (err) {
     alert(`No se pudo iniciar la captura: ${err.message}`);
+    isStarting = false;
     return;
   }
 
@@ -541,6 +488,7 @@ async function startRecording() {
   recDot.classList.add('live');
   recordBtn.textContent = '■ Detener grabación';
   recordBtn.classList.add('recording');
+  isStarting = false;
 }
 
 async function onRecordingStopped() {
@@ -554,6 +502,7 @@ async function onRecordingStopped() {
     // En este modo, grabar no espera nunca a que se optimice: la captura
     // queda en "Grabaciones sin optimizar" y el botón se libera al toque.
     pendingAudioMap.set(tempPath, window.__loweyHasAudio);
+    pendingDurationMap.set(tempPath, (Date.now() - recordStart) / 1000);
     recordBtn.disabled = false;
     recordBtn.textContent = '● Iniciar grabación';
     recordBtn.classList.remove('recording');
@@ -581,7 +530,8 @@ async function onRecordingStopped() {
       baseName,
       qualityId: 'hevcAudioIntacto',
       resolutionId: resolutionSelect.value,
-      keepAudio: window.__loweyHasAudio
+      keepAudio: window.__loweyHasAudio,
+      durationSeconds: (Date.now() - recordStart) / 1000
     });
 
     const savedPercent = result.tempSizeBytes
@@ -618,7 +568,7 @@ async function onRecordingStopped() {
 function toggleRecording() {
   if (mediaRecorder && mediaRecorder.state === 'recording') {
     mediaRecorder.stop();
-  } else if (!recordBtn.disabled) {
+  } else if (!recordBtn.disabled && !isStarting) {
     startRecording();
   }
 }
@@ -657,108 +607,6 @@ async function loadShortcutHint() {
   const shortcutHint = document.getElementById('shortcutHint');
   shortcutHint.textContent = `Atajo para iniciar/detener sin abrir la ventana: "${shortcut}"`;
 }
-
-// --- Selección de región ---
-
-function updateRegionButtonState() {
-  chooseRegionBtn.disabled = !regionToggle.checked || !selectedSourceId;
-}
-
-regionToggle.addEventListener('change', () => {
-  updateRegionButtonState();
-  if (!regionToggle.checked) {
-    regionRect = null;
-    regionHint.textContent = '';
-  }
-});
-
-let dragState = null;
-
-function resetSelectionBox() {
-  regionSelectionBox.classList.add('hidden');
-  regionSelectionBox.style.width = '0px';
-  regionSelectionBox.style.height = '0px';
-  regionConfirmBtn.disabled = true;
-}
-
-chooseRegionBtn.addEventListener('click', async () => {
-  if (!selectedSourceId) return;
-  const originalText = chooseRegionBtn.textContent;
-  chooseRegionBtn.disabled = true;
-  chooseRegionBtn.textContent = 'Cargando…';
-  try {
-    const dataUrl = await window.lowey.getSourcePreview(selectedSourceId);
-    if (!dataUrl) {
-      alert('No se pudo generar la vista previa de esta fuente.');
-      return;
-    }
-    regionPreviewImg.src = dataUrl;
-    resetSelectionBox();
-    regionModal.classList.remove('hidden');
-  } catch (err) {
-    alert(`No se pudo abrir la selección de región: ${err.message}`);
-  } finally {
-    chooseRegionBtn.disabled = false;
-    chooseRegionBtn.textContent = originalText;
-  }
-});
-
-regionPreviewWrap.addEventListener('mousedown', (event) => {
-  const rect = regionPreviewImg.getBoundingClientRect();
-  const x = Math.min(Math.max(event.clientX - rect.left, 0), rect.width);
-  const y = Math.min(Math.max(event.clientY - rect.top, 0), rect.height);
-  dragState = { startX: x, startY: y, imgRect: rect };
-  regionSelectionBox.classList.remove('hidden');
-  regionSelectionBox.style.left = `${x}px`;
-  regionSelectionBox.style.top = `${y}px`;
-  regionSelectionBox.style.width = '0px';
-  regionSelectionBox.style.height = '0px';
-});
-
-window.addEventListener('mousemove', (event) => {
-  if (!dragState) return;
-  const { startX, startY, imgRect } = dragState;
-  const x = Math.min(Math.max(event.clientX - imgRect.left, 0), imgRect.width);
-  const y = Math.min(Math.max(event.clientY - imgRect.top, 0), imgRect.height);
-  const left = Math.min(startX, x);
-  const top = Math.min(startY, y);
-  const width = Math.abs(x - startX);
-  const height = Math.abs(y - startY);
-  regionSelectionBox.style.left = `${left}px`;
-  regionSelectionBox.style.top = `${top}px`;
-  regionSelectionBox.style.width = `${width}px`;
-  regionSelectionBox.style.height = `${height}px`;
-});
-
-window.addEventListener('mouseup', () => {
-  if (!dragState) return;
-  const width = parseFloat(regionSelectionBox.style.width);
-  const height = parseFloat(regionSelectionBox.style.height);
-  regionConfirmBtn.disabled = width < 10 || height < 10;
-  dragState = null;
-});
-
-regionConfirmBtn.addEventListener('click', () => {
-  const imgRect = regionPreviewImg.getBoundingClientRect();
-  const left = parseFloat(regionSelectionBox.style.left);
-  const top = parseFloat(regionSelectionBox.style.top);
-  const width = parseFloat(regionSelectionBox.style.width);
-  const height = parseFloat(regionSelectionBox.style.height);
-
-  regionRect = {
-    x: left / imgRect.width,
-    y: top / imgRect.height,
-    w: width / imgRect.width,
-    h: height / imgRect.height
-  };
-
-  regionHint.textContent = `Región elegida: ${Math.round(regionRect.w * 100)}% x ${Math.round(regionRect.h * 100)}% de la pantalla ✓`;
-  regionModal.classList.add('hidden');
-});
-
-regionCancelBtn.addEventListener('click', () => {
-  regionModal.classList.add('hidden');
-});
 
 loadSources();
 loadResolutionOptions();

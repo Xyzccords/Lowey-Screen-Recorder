@@ -2,7 +2,6 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('lowey', {
   getSources: () => ipcRenderer.invoke('get-sources'),
-  getQualityPresets: () => ipcRenderer.invoke('get-quality-presets'),
   getRecordShortcut: () => ipcRenderer.invoke('get-record-shortcut'),
   onToggleRecordingShortcut: (callback) => {
     const listener = () => callback();
@@ -35,7 +34,6 @@ contextBridge.exposeInMainWorld('lowey', {
   showInFolder: (filePath) => ipcRenderer.invoke('show-in-folder', filePath),
 
   getResolutionOptions: () => ipcRenderer.invoke('get-resolution-options'),
-  getSourcePreview: (sourceId) => ipcRenderer.invoke('get-source-preview', sourceId),
 
   notifyRecordingStarted: (startedAt) => ipcRenderer.send('recording-started', startedAt),
   notifyRecordingStopped: () => ipcRenderer.send('recording-stopped'),

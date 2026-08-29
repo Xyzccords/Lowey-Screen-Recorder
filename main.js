@@ -199,20 +199,6 @@ ipcMain.on('recording-stopped', () => {
   }
 });
 
-ipcMain.handle('get-source-preview', async (event, sourceId) => {
-  const sources = await desktopCapturer.getSources({
-    types: ['window', 'screen'],
-    thumbnailSize: { width: 1600, height: 900 }
-  });
-  const source = sources.find((s) => s.id === sourceId);
-  if (!source || source.thumbnail.isEmpty()) return null;
-  return source.thumbnail.toDataURL();
-});
-
-ipcMain.handle('get-quality-presets', () => {
-  return Object.entries(QUALITY_PRESETS).map(([id, p]) => ({ id, label: p.label }));
-});
-
 ipcMain.handle('choose-save-folder', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     properties: ['openDirectory', 'createDirectory']
@@ -306,10 +292,16 @@ function parseDurationSeconds(text) {
   return Number(h) * 3600 + Number(m) * 60 + Number(s);
 }
 
-function runFfmpeg(args) {
+// knownDurationSeconds: duración real ya conocida (trackeada en el renderer
+// con Date.now() mientras se grababa). Los .webm que graba esta app quedan
+// sin duración en el header (son streaming, sin Cues/Duration), así que
+// ffmpeg reporta "Duration: N/A" y nunca podría calcular el progreso por sí
+// solo: por eso se le pasa la duración real de afuera en vez de depender de
+// que ffmpeg la lea del archivo.
+function runFfmpeg(args, knownDurationSeconds) {
   return new Promise((resolve, reject) => {
     const ff = spawn(ffmpegPath, args);
-    let totalDuration = null;
+    let totalDuration = knownDurationSeconds > 0 ? knownDurationSeconds : null;
     let stderrBuffer = '';
 
     ff.stderr.on('data', (data) => {
@@ -346,7 +338,7 @@ function runFfmpeg(args) {
   });
 }
 
-ipcMain.handle('finish-recording', async (event, { tempPath, outputDir, baseName, qualityId, keepAudio, resolutionId }) => {
+ipcMain.handle('finish-recording', async (event, { tempPath, outputDir, baseName, qualityId, keepAudio, resolutionId, durationSeconds }) => {
   const preset = QUALITY_PRESETS[qualityId] || QUALITY_PRESETS.hevcAudioIntacto;
   fs.mkdirSync(outputDir, { recursive: true });
   const outputPath = path.join(outputDir, `${baseName}.mp4`);
@@ -359,7 +351,8 @@ ipcMain.handle('finish-recording', async (event, { tempPath, outputDir, baseName
     : ['-an'];
   const trailingArgs = ['-pix_fmt', 'yuv420p', ...audioArgs, '-movflags', '+faststart', outputPath];
 
-  const encode = (encoderArgs) => runFfmpeg(['-y', '-i', tempPath, ...scaleArgs, ...encoderArgs, ...trailingArgs]);
+  const encode = (encoderArgs) =>
+    runFfmpeg(['-y', '-i', tempPath, ...scaleArgs, ...encoderArgs, ...trailingArgs], durationSeconds);
 
   const encoderArgs = ['-c:v', preset.codec, '-crf', String(preset.crf), '-preset', preset.preset];
   if (preset.tag) encoderArgs.push('-tag:v', preset.tag);
