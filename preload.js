@@ -18,13 +18,16 @@ contextBridge.exposeInMainWorld('lowey', {
     return () => ipcRenderer.removeListener('write-error', listener);
   },
 
-  startWriteStream: () => ipcRenderer.invoke('start-write-stream'),
+  startWriteStream: (payload) => ipcRenderer.invoke('start-write-stream', payload),
   writeChunk: (id, arrayBuffer) => ipcRenderer.send('write-chunk', id, arrayBuffer),
   endWriteStream: (id) => ipcRenderer.invoke('end-write-stream', id),
 
+  startVideoCapture: (payload) => ipcRenderer.invoke('start-video-capture', payload),
+  stopVideoCapture: (id) => ipcRenderer.invoke('stop-video-capture', id),
+
   finishRecording: (payload) => ipcRenderer.invoke('finish-recording', payload),
   listPendingRecordings: () => ipcRenderer.invoke('list-pending-recordings'),
-  discardPendingRecording: (tempPath) => ipcRenderer.invoke('discard-pending-recording', tempPath),
+  discardPendingRecording: (id) => ipcRenderer.invoke('discard-pending-recording', id),
   onEncodeProgress: (callback) => {
     const listener = (event, data) => callback(data);
     ipcRenderer.on('encode-progress', listener);

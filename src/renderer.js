@@ -51,17 +51,21 @@ const RESOLUTION_LABELS = {
 };
 
 let selectedSourceId = null;
+let selectedSourceName = null;
+let selectedSourceIsScreen = false;
 let outputDir = null;
-let mediaRecorder = null;
+let audioRecorder = null;
+let isRecording = false;
 let isStarting = false; // evita iniciar dos capturas si F9 se aprieta dos veces muy rápido
 let activeStreams = [];
 let audioContext = null;
-let recordingId = null;
-let tempPath = null;
+let recordingId = null; // id del write-stream de audio (null si no hay audio)
+let videoCaptureId = null; // id de la captura de video por ffmpeg
+let videoPath = null;
+let audioPath = null;
 let timerInterval = null;
 let recordStart = null;
-const pendingAudioMap = new Map(); // tempPath -> tenía audio al grabarse
-const pendingDurationMap = new Map(); // tempPath -> duración real grabada, en segundos
+const pendingDurationMap = new Map(); // id -> duración real grabada, en segundos
 
 function formatBytes(bytes) {
   if (!bytes) return '0 B';
@@ -154,6 +158,8 @@ async function loadSources() {
 
     card.addEventListener('click', () => {
       selectedSourceId = source.id;
+      selectedSourceName = source.name;
+      selectedSourceIsScreen = source.isScreen;
       document.querySelectorAll('.source-card').forEach((c) => c.classList.remove('selected'));
       card.classList.add('selected');
     });
@@ -200,7 +206,9 @@ async function loadPendingRecordings() {
   items.forEach((item) => {
     const row = document.createElement('div');
     row.className = 'pending-item';
-    row.dataset.tempPath = item.tempPath;
+    row.dataset.id = item.id;
+    row.dataset.videoPath = item.videoPath;
+    row.dataset.audioPath = item.audioPath || '';
 
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
@@ -221,9 +229,8 @@ async function loadPendingRecordings() {
     discardBtn.textContent = 'Descartar';
     discardBtn.addEventListener('click', async () => {
       if (!confirm('¿Borrar esta captura sin optimizar? No se puede deshacer.')) return;
-      await window.lowey.discardPendingRecording(item.tempPath);
-      pendingAudioMap.delete(item.tempPath);
-      pendingDurationMap.delete(item.tempPath);
+      await window.lowey.discardPendingRecording(item.id);
+      pendingDurationMap.delete(item.id);
       loadPendingRecordings();
     });
     row.appendChild(discardBtn);
@@ -239,39 +246,35 @@ function updateCompressButtonState() {
   compressSelectedBtn.disabled = !anyChecked;
 }
 
-function extractRecordedAt(tempPathValue) {
-  const match = tempPathValue.match(/rec-(\d+)\.webm$/);
-  return match ? Number(match[1]) : Date.now();
-}
-
-async function compressOne(itemTempPath) {
-  const baseName = `Grabacion_${new Date(extractRecordedAt(itemTempPath)).toISOString().replace(/[:.]/g, '-')}`;
-  const keepAudio = pendingAudioMap.has(itemTempPath) ? pendingAudioMap.get(itemTempPath) : true;
+async function compressOne(item) {
+  const recordedAt = Number(item.id.replace('rec-', '')) || Date.now();
+  const baseName = `Grabacion_${new Date(recordedAt).toISOString().replace(/[:.]/g, '-')}`;
   // Solo se conoce si esta pending quedó de esta misma sesión (se trackea en
   // vivo con Date.now()); si el programa se reinició y la captura ya estaba
   // en la carpeta temporal de antes, no hay forma de saber cuánto duró.
-  const durationSeconds = pendingDurationMap.get(itemTempPath);
+  const durationSeconds = pendingDurationMap.get(item.id);
 
   const result = await window.lowey.finishRecording({
-    tempPath: itemTempPath,
+    videoPath: item.videoPath,
+    audioPath: item.audioPath || null,
     outputDir,
     baseName,
     qualityId: 'hevcAudioIntacto',
     resolutionId: resolutionSelect.value,
-    keepAudio,
+    keepAudio: Boolean(item.audioPath),
     durationSeconds
   });
 
-  pendingAudioMap.delete(itemTempPath);
-  pendingDurationMap.delete(itemTempPath);
+  pendingDurationMap.delete(item.id);
   return result;
 }
 
 compressSelectedBtn.addEventListener('click', async () => {
-  const checkedRows = Array.from(pendingList.querySelectorAll('.pending-checkbox:checked')).map(
-    (cb) => cb.closest('.pending-item').dataset.tempPath
-  );
-  if (checkedRows.length === 0) return;
+  const checkedItems = Array.from(pendingList.querySelectorAll('.pending-checkbox:checked')).map((cb) => {
+    const row = cb.closest('.pending-item');
+    return { id: row.dataset.id, videoPath: row.dataset.videoPath, audioPath: row.dataset.audioPath || null };
+  });
+  if (checkedItems.length === 0) return;
 
   compressSelectedBtn.disabled = true;
   resultBox.classList.add('hidden');
@@ -284,11 +287,11 @@ compressSelectedBtn.addEventListener('click', async () => {
   const results = [];
   const errors = [];
 
-  for (let i = 0; i < checkedRows.length; i += 1) {
-    encodeProgressLabel.textContent = `Optimizando ${i + 1} de ${checkedRows.length}…`;
+  for (let i = 0; i < checkedItems.length; i += 1) {
+    encodeProgressLabel.textContent = `Optimizando ${i + 1} de ${checkedItems.length}…`;
     encodeProgress.value = 0;
     try {
-      const result = await compressOne(checkedRows[i]);
+      const result = await compressOne(checkedItems[i]);
       results.push(result);
     } catch (err) {
       errors.push(err.message);
@@ -344,44 +347,40 @@ function stopAllStreams() {
   }
 }
 
-async function buildCaptureStream(sourceId, fps, wantMic, wantSystemAudio) {
+// Esta app ya NO graba el video en vivo con MediaRecorder del navegador: eso
+// se hace aparte, con ffmpeg (ver startVideoCapture), porque el bitrate que
+// le pedís a MediaRecorder para captura de escritorio es solo una sugerencia
+// que Chromium ignora feo con contenido de mucho movimiento (medido: 2.7x a
+// 4.5x más pesado de lo pedido). Acá solo se arma el audio (opcional).
+async function buildAudioStream(sourceId, wantMic, wantSystemAudio) {
   const videoConstraint = {
-    mandatory: {
-      chromeMediaSource: 'desktop',
-      chromeMediaSourceId: sourceId,
-      minFrameRate: fps,
-      maxFrameRate: fps
-    }
+    mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: sourceId }
   };
-
   const desktopAudioConstraint = {
-    mandatory: {
-      chromeMediaSource: 'desktop',
-      chromeMediaSourceId: sourceId
-    }
+    mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: sourceId }
   };
 
   // Chromium exige pedir el audio de escritorio (loopback) en la MISMA llamada
-  // a getUserMedia que el video: pedirlo por separado (solo audio) puede colgar
-  // o tirar abajo el proceso de renderizado en algunos sistemas Windows.
-  let desktopStream;
-  try {
-    desktopStream = await navigator.mediaDevices.getUserMedia({
-      audio: wantSystemAudio ? desktopAudioConstraint : false,
-      video: videoConstraint
-    });
-  } catch (err) {
-    if (!wantSystemAudio) throw err;
-    // Reintentar sin audio del sistema por si el origen elegido no lo soporta.
-    desktopStream = await navigator.mediaDevices.getUserMedia({
-      audio: false,
-      video: videoConstraint
-    });
+  // a getUserMedia que un video (aunque no lo vayamos a usar): pedirlo solo
+  // puede colgar o tirar abajo el proceso de renderizado en Windows.
+  let desktopStream = null;
+  if (wantSystemAudio) {
+    try {
+      desktopStream = await navigator.mediaDevices.getUserMedia({
+        audio: desktopAudioConstraint,
+        video: videoConstraint
+      });
+    } catch (err) {
+      desktopStream = null;
+    }
   }
 
-  const videoStream = desktopStream;
-  const desktopAudioStream = desktopStream.getAudioTracks().length > 0 ? desktopStream : null;
-  activeStreams.push(videoStream);
+  // El video de esta llamada no se usa para nada (el real lo captura ffmpeg
+  // aparte): se corta enseguida para no gastar recursos de más.
+  if (desktopStream) {
+    desktopStream.getVideoTracks().forEach((track) => track.stop());
+    activeStreams.push(desktopStream);
+  }
 
   let micStream = null;
   if (wantMic) {
@@ -394,9 +393,8 @@ async function buildCaptureStream(sourceId, fps, wantMic, wantSystemAudio) {
   }
 
   const combined = new MediaStream();
-  videoStream.getVideoTracks().forEach((track) => combined.addTrack(track));
+  const audioSources = [desktopStream && desktopStream.getAudioTracks().length > 0 ? desktopStream : null, micStream].filter(Boolean);
 
-  const audioSources = [desktopAudioStream, micStream].filter(Boolean);
   if (audioSources.length === 1) {
     audioSources[0].getAudioTracks().forEach((track) => combined.addTrack(track));
   } else if (audioSources.length > 1) {
@@ -412,14 +410,9 @@ async function buildCaptureStream(sourceId, fps, wantMic, wantSystemAudio) {
   return { stream: combined, hasAudio: audioSources.length > 0 };
 }
 
-function pickMimeType() {
-  const candidates = [
-    'video/webm;codecs=vp9,opus',
-    'video/webm;codecs=vp9',
-    'video/webm;codecs=vp8,opus',
-    'video/webm'
-  ];
-  return candidates.find((type) => MediaRecorder.isTypeSupported(type)) || 'video/webm';
+function pickAudioMimeType() {
+  const candidates = ['audio/webm;codecs=opus', 'audio/webm'];
+  return candidates.find((type) => MediaRecorder.isTypeSupported(type)) || 'audio/webm';
 }
 
 async function startRecording() {
@@ -436,49 +429,65 @@ async function startRecording() {
   const fps = Number(fpsSelect.value);
   const wantMic = micToggle.checked;
   const wantSystemAudio = systemAudioToggle.checked;
-
-  let captured;
-  try {
-    captured = await buildCaptureStream(selectedSourceId, fps, wantMic, wantSystemAudio);
-  } catch (err) {
-    alert(`No se pudo iniciar la captura: ${err.message}`);
-    isStarting = false;
-    return;
-  }
-
-  const { id, tempPath: tPath } = await window.lowey.startWriteStream();
-  recordingId = id;
-  tempPath = tPath;
-  window.__loweyHasAudio = captured.hasAudio;
+  const id = `rec-${Date.now()}`;
 
   // Bitrate de la captura EN VIVO. En "Modo Visual Novel" se prioriza calidad
   // asumiendo que el juego/app grabado no necesita muchos recursos. En
   // "Modo juego exigente" se baja bastante para no competirle CPU a un juego
   // pesado mientras se graba (la calidad del archivo final no se toca acá,
-  // eso lo resuelve la recompresión posterior).
+  // eso lo resuelve la recompresión posterior). A diferencia del navegador,
+  // ffmpeg sí respeta este límite de verdad (-maxrate/-bufsize).
   const isLowImpact = captureModeSelect.value === 'liviano';
   const videoBitsPerSecond = isLowImpact
     ? (fps >= 60 ? 5_000_000 : 4_000_000)
     : (fps >= 60 ? 9_000_000 : 7_000_000);
 
-  mediaRecorder = new MediaRecorder(captured.stream, {
-    mimeType: pickMimeType(),
-    videoBitsPerSecond,
-    audioBitsPerSecond: 256_000
-  });
+  let videoCapture;
+  try {
+    videoCapture = await window.lowey.startVideoCapture({
+      id,
+      fps,
+      videoBitsPerSecond,
+      source: { name: selectedSourceName, isScreen: selectedSourceIsScreen }
+    });
+  } catch (err) {
+    alert(`No se pudo iniciar la captura de video: ${err.message}`);
+    isStarting = false;
+    return;
+  }
+  videoCaptureId = videoCapture.id;
+  videoPath = videoCapture.videoPath;
 
-  mediaRecorder.ondataavailable = async (event) => {
-    if (event.data && event.data.size > 0) {
-      const buffer = await event.data.arrayBuffer();
-      window.lowey.writeChunk(recordingId, buffer);
-    }
-  };
+  let audioCaptured = { stream: new MediaStream(), hasAudio: false };
+  try {
+    audioCaptured = await buildAudioStream(selectedSourceId, wantMic, wantSystemAudio);
+  } catch (err) {
+    console.error('No se pudo capturar audio, se graba sin audio:', err);
+  }
 
-  mediaRecorder.onstop = onRecordingStopped;
+  recordingId = null;
+  audioPath = null;
+  audioRecorder = null;
 
-  // Trozos chicos y frecuentes en vez de uno grande por segundo: repartir el
-  // trabajo de volcar cada trozo a disco evita baches periódicos notorios.
-  mediaRecorder.start(250);
+  if (audioCaptured.hasAudio) {
+    const { id: aId, tempPath: aPath } = await window.lowey.startWriteStream({ id });
+    recordingId = aId;
+    audioPath = aPath;
+
+    audioRecorder = new MediaRecorder(audioCaptured.stream, {
+      mimeType: pickAudioMimeType(),
+      audioBitsPerSecond: 256_000
+    });
+    audioRecorder.ondataavailable = async (event) => {
+      if (event.data && event.data.size > 0) {
+        const buffer = await event.data.arrayBuffer();
+        window.lowey.writeChunk(recordingId, buffer);
+      }
+    };
+    // Trozos chicos y frecuentes en vez de uno grande por segundo.
+    audioRecorder.start(250);
+  }
+
   recordStart = Date.now();
   window.lowey.notifyRecordingStarted(recordStart);
   timerInterval = setInterval(() => {
@@ -488,21 +497,34 @@ async function startRecording() {
   recDot.classList.add('live');
   recordBtn.textContent = '■ Detener grabación';
   recordBtn.classList.add('recording');
+  isRecording = true;
   isStarting = false;
 }
 
-async function onRecordingStopped() {
+async function stopRecording() {
+  isRecording = false;
   clearInterval(timerInterval);
   recDot.classList.remove('live');
   window.lowey.notifyRecordingStopped();
-  stopAllStreams();
-  await window.lowey.endWriteStream(recordingId);
 
+  if (audioRecorder && audioRecorder.state === 'recording') {
+    await new Promise((resolve) => {
+      audioRecorder.onstop = resolve;
+      audioRecorder.stop();
+    });
+  }
+  stopAllStreams();
+  if (recordingId) await window.lowey.endWriteStream(recordingId);
+  await window.lowey.stopVideoCapture(videoCaptureId);
+
+  await onRecordingStopped();
+}
+
+async function onRecordingStopped() {
   if (currentMode === 'quick') {
     // En este modo, grabar no espera nunca a que se optimice: la captura
     // queda en "Grabaciones sin optimizar" y el botón se libera al toque.
-    pendingAudioMap.set(tempPath, window.__loweyHasAudio);
-    pendingDurationMap.set(tempPath, (Date.now() - recordStart) / 1000);
+    pendingDurationMap.set(videoCaptureId, (Date.now() - recordStart) / 1000);
     recordBtn.disabled = false;
     recordBtn.textContent = '● Iniciar grabación';
     recordBtn.classList.remove('recording');
@@ -525,12 +547,13 @@ async function onRecordingStopped() {
 
   try {
     const result = await window.lowey.finishRecording({
-      tempPath,
+      videoPath,
+      audioPath,
       outputDir,
       baseName,
       qualityId: 'hevcAudioIntacto',
       resolutionId: resolutionSelect.value,
-      keepAudio: window.__loweyHasAudio,
+      keepAudio: Boolean(audioPath),
       durationSeconds: (Date.now() - recordStart) / 1000
     });
 
@@ -566,8 +589,8 @@ async function onRecordingStopped() {
 }
 
 function toggleRecording() {
-  if (mediaRecorder && mediaRecorder.state === 'recording') {
-    mediaRecorder.stop();
+  if (isRecording) {
+    stopRecording();
   } else if (!recordBtn.disabled && !isStarting) {
     startRecording();
   }
@@ -597,9 +620,7 @@ chooseTempFolderBtn.addEventListener('click', async () => {
 
 window.lowey.onWriteError(({ message }) => {
   alert(`No se pudo seguir grabando: ${message}`);
-  if (mediaRecorder && mediaRecorder.state === 'recording') {
-    mediaRecorder.stop();
-  }
+  if (isRecording) stopRecording();
 });
 
 async function loadShortcutHint() {

@@ -61,6 +61,81 @@ const RESOLUTION_HEIGHTS = {
 let mainWindow;
 let floatingWindow;
 const writeStreams = new Map();
+const videoCaptures = new Map(); // id -> proceso ffmpeg de captura de video en vivo
+
+// El video EN VIVO se captura con la herramienta de captura de pantalla nativa
+// de cada sistema operativo (no con MediaRecorder del navegador): medimos que
+// el "videoBitsPerSecond" del navegador para captura de escritorio es solo una
+// sugerencia que Chromium se salta feo con contenido de mucho movimiento (se
+// midió 2.7x-4.5x por encima de lo pedido en una prueba real). ffmpeg, en
+// cambio, sí respeta un límite de bitrate real (-maxrate/-bufsize).
+function buildScreenCaptureInputArgs(fps, source) {
+  const framerate = String(fps);
+  if (process.platform === 'win32') {
+    return source.isScreen
+      ? ['-f', 'gdigrab', '-framerate', framerate, '-i', 'desktop']
+      : ['-f', 'gdigrab', '-framerate', framerate, '-i', `title=${source.name}`];
+  }
+  if (process.platform === 'darwin') {
+    // No hay forma confiable de detectar automáticamente el índice de pantalla
+    // en avfoundation; se asume la pantalla principal como mejor esfuerzo.
+    return ['-f', 'avfoundation', '-framerate', framerate, '-i', '1:none'];
+  }
+  // Linux (X11)
+  return ['-f', 'x11grab', '-framerate', framerate, '-i', process.env.DISPLAY || ':0.0'];
+}
+
+ipcMain.handle('start-video-capture', async (event, { id, fps, videoBitsPerSecond, source }) => {
+  const videoPath = path.join(getTempDir(), `${id}-video.mp4`);
+  const bps = String(Math.round(videoBitsPerSecond));
+  const inputArgs = buildScreenCaptureInputArgs(fps, source);
+  const encoderArgs = [
+    '-c:v', 'libx264',
+    '-preset', 'ultrafast',
+    '-b:v', bps,
+    '-maxrate', bps,
+    '-bufsize', String(Math.round(videoBitsPerSecond * 2)),
+    '-pix_fmt', 'yuv420p',
+    '-g', String(fps * 2)
+  ];
+  const args = [...inputArgs, ...encoderArgs, '-y', videoPath];
+
+  const proc = spawn(ffmpegPath, args);
+  let stderrBuffer = '';
+  proc.stderr.on('data', (data) => { stderrBuffer += data.toString(); });
+  proc.on('error', (err) => {
+    console.error('Error al iniciar la captura de video:', err);
+  });
+  videoCaptures.set(id, { proc, videoPath, getStderr: () => stderrBuffer });
+
+  return { id, videoPath };
+});
+
+ipcMain.handle('stop-video-capture', (event, id) => {
+  return new Promise((resolve) => {
+    const entry = videoCaptures.get(id);
+    if (!entry) {
+      resolve();
+      return;
+    }
+    const { proc } = entry;
+    const forceKillTimer = setTimeout(() => {
+      if (!proc.killed) proc.kill('SIGKILL');
+    }, 5000);
+    proc.once('close', () => {
+      clearTimeout(forceKillTimer);
+      videoCaptures.delete(id);
+      resolve();
+    });
+    // "q" por stdin le pide a ffmpeg que cierre el archivo prolijamente (con
+    // duración válida en el header), en vez de matarlo de un tirón.
+    try {
+      proc.stdin.write('q');
+    } catch (err) {
+      proc.kill();
+    }
+  });
+});
 
 // Atajo global para iniciar/detener la grabación sin tener que hacer foco
 // en la ventana (útil porque abrir la app taparía lo que se está grabando).
@@ -137,6 +212,13 @@ app.whenReady().then(() => {
 
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
+  videoCaptures.forEach(({ proc }) => {
+    try {
+      proc.kill();
+    } catch (err) {
+      // ya terminado
+    }
+  });
 });
 
 app.on('window-all-closed', () => {
@@ -223,9 +305,8 @@ ipcMain.handle('choose-temp-folder', async () => {
   return settings.tempDir;
 });
 
-ipcMain.handle('start-write-stream', async () => {
-  const id = `rec-${Date.now()}`;
-  const tempPath = path.join(getTempDir(), `${id}.webm`);
+ipcMain.handle('start-write-stream', async (event, { id }) => {
+  const tempPath = path.join(getTempDir(), `${id}-audio.webm`);
   const stream = fs.createWriteStream(tempPath);
   stream.on('error', (err) => {
     console.error('Error escribiendo el archivo temporal:', err);
@@ -255,7 +336,10 @@ ipcMain.handle('end-write-stream', async (event, id) => {
   writeStreams.delete(id);
 });
 
-const PENDING_FILENAME_RE = /^rec-\d+\.webm$/;
+// Cada grabación pendiente son dos archivos con el mismo id: "<id>-video.mp4"
+// (siempre existe) y opcionalmente "<id>-audio.webm" (si se grabó audio).
+const PENDING_ID_RE = /^rec-\d+$/;
+const PENDING_VIDEO_RE = /^(rec-\d+)-video\.mp4$/;
 
 ipcMain.handle('list-pending-recordings', () => {
   const dir = getTempDir();
@@ -267,22 +351,33 @@ ipcMain.handle('list-pending-recordings', () => {
   }
 
   return files
-    .filter((name) => PENDING_FILENAME_RE.test(name))
-    .map((name) => {
-      const tempPath = path.join(dir, name);
-      const stat = fs.statSync(tempPath);
-      return { tempPath, sizeBytes: stat.size, createdAt: stat.mtimeMs };
+    .map((name) => ({ name, match: name.match(PENDING_VIDEO_RE) }))
+    .filter(({ match }) => match)
+    .map(({ name, match }) => {
+      const id = match[1];
+      const videoPath = path.join(dir, name);
+      const audioPath = path.join(dir, `${id}-audio.webm`);
+      const hasAudio = fs.existsSync(audioPath);
+      const videoStat = fs.statSync(videoPath);
+      const audioSize = hasAudio ? fs.statSync(audioPath).size : 0;
+      return {
+        id,
+        videoPath,
+        audioPath: hasAudio ? audioPath : null,
+        sizeBytes: videoStat.size + audioSize,
+        createdAt: videoStat.mtimeMs
+      };
     })
     .sort((a, b) => b.createdAt - a.createdAt);
 });
 
-ipcMain.handle('discard-pending-recording', (event, tempPath) => {
-  const dir = getTempDir();
-  const name = path.basename(tempPath);
-  if (path.join(dir, name) !== tempPath || !PENDING_FILENAME_RE.test(name)) {
-    throw new Error('Ruta inválida.');
+ipcMain.handle('discard-pending-recording', (event, id) => {
+  if (!PENDING_ID_RE.test(id)) {
+    throw new Error('Id inválido.');
   }
-  fs.unlink(tempPath, () => {});
+  const dir = getTempDir();
+  fs.unlink(path.join(dir, `${id}-video.mp4`), () => {});
+  fs.unlink(path.join(dir, `${id}-audio.webm`), () => {});
 });
 
 function parseDurationSeconds(text) {
@@ -338,7 +433,7 @@ function runFfmpeg(args, knownDurationSeconds) {
   });
 }
 
-ipcMain.handle('finish-recording', async (event, { tempPath, outputDir, baseName, qualityId, keepAudio, resolutionId, durationSeconds }) => {
+ipcMain.handle('finish-recording', async (event, { videoPath, audioPath, outputDir, baseName, qualityId, keepAudio, resolutionId, durationSeconds }) => {
   const preset = QUALITY_PRESETS[qualityId] || QUALITY_PRESETS.hevcAudioIntacto;
   fs.mkdirSync(outputDir, { recursive: true });
   const outputPath = path.join(outputDir, `${baseName}.mp4`);
@@ -346,27 +441,33 @@ ipcMain.handle('finish-recording', async (event, { tempPath, outputDir, baseName
   const targetHeight = RESOLUTION_HEIGHTS[resolutionId] || null;
   const scaleArgs = targetHeight ? ['-vf', `scale=-2:${targetHeight}`] : [];
 
-  const audioArgs = keepAudio
+  const hasAudio = Boolean(keepAudio && audioPath && fs.existsSync(audioPath));
+  const inputArgs = hasAudio ? ['-i', videoPath, '-i', audioPath] : ['-i', videoPath];
+  const mapArgs = hasAudio ? ['-map', '0:v', '-map', '1:a'] : [];
+  const audioArgs = hasAudio
     ? (preset.copyAudio ? ['-c:a', 'copy'] : ['-c:a', 'aac', '-b:a', '160k'])
     : ['-an'];
   const trailingArgs = ['-pix_fmt', 'yuv420p', ...audioArgs, '-movflags', '+faststart', outputPath];
 
-  const encode = (encoderArgs) =>
-    runFfmpeg(['-y', '-i', tempPath, ...scaleArgs, ...encoderArgs, ...trailingArgs], durationSeconds);
-
   const encoderArgs = ['-c:v', preset.codec, '-crf', String(preset.crf), '-preset', preset.preset];
   if (preset.tag) encoderArgs.push('-tag:v', preset.tag);
-  await encode(encoderArgs);
+
+  await runFfmpeg(
+    ['-y', ...inputArgs, ...mapArgs, ...scaleArgs, ...encoderArgs, ...trailingArgs],
+    durationSeconds
+  );
   const encoderUsed = 'CPU';
 
-  const tempSize = fs.existsSync(tempPath) ? fs.statSync(tempPath).size : 0;
+  const videoSize = fs.existsSync(videoPath) ? fs.statSync(videoPath).size : 0;
+  const audioSize = hasAudio ? fs.statSync(audioPath).size : 0;
   const finalSize = fs.existsSync(outputPath) ? fs.statSync(outputPath).size : 0;
 
-  fs.unlink(tempPath, () => {});
+  fs.unlink(videoPath, () => {});
+  if (audioPath) fs.unlink(audioPath, () => {});
 
   return {
     outputPath,
-    tempSizeBytes: tempSize,
+    tempSizeBytes: videoSize + audioSize,
     finalSizeBytes: finalSize,
     encoderUsed
   };
