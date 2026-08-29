@@ -18,7 +18,15 @@ const recDot = document.getElementById('recDot');
 const recTimer = document.getElementById('recTimer');
 const encodeProgressWrap = document.getElementById('encodeProgressWrap');
 const encodeProgress = document.getElementById('encodeProgress');
+const encodeProgressLabel = document.getElementById('encodeProgressLabel');
 const resultBox = document.getElementById('resultBox');
+
+const appTitle = document.getElementById('appTitle');
+const modeButtons = document.querySelectorAll('.mode-btn');
+const pendingSection = document.getElementById('pendingSection');
+const pendingList = document.getElementById('pendingList');
+const refreshPendingBtn = document.getElementById('refreshPending');
+const compressSelectedBtn = document.getElementById('compressSelectedBtn');
 
 const regionToggle = document.getElementById('regionToggle');
 const chooseRegionBtn = document.getElementById('chooseRegionBtn');
@@ -43,8 +51,16 @@ window.addEventListener('unhandledrejection', (event) => {
 const QUALITY_HINTS = {
   rapidaGpu: 'Usa la placa de video (NVIDIA/Intel/AMD) para codificar en segundos en vez de minutos. Prueba HEVC y H.264 por GPU antes de caer a CPU automáticamente si no hay ninguna compatible.',
   equilibrada: 'H.264, CRF 23. Máxima compatibilidad (WhatsApp, redes, edición), buen balance calidad/peso.',
-  ligera: 'H.264, CRF 28. Prioriza el tamaño de archivo sobre el detalle fino.'
+  ligera: 'H.264, CRF 28. Prioriza el tamaño de archivo sobre el detalle fino.',
+  hevcAudioIntacto: 'H.265, CRF 22, una sola pasada. El audio se copia tal cual, sin recodificar.'
 };
+
+const MODE_NAMES = {
+  normal: 'Lowey Screen Recorder',
+  quick: "Abi's Quick Recorder"
+};
+
+let currentMode = 'normal';
 
 const RESOLUTION_LABELS = {
   original: 'Original (sin cambios)',
@@ -64,6 +80,7 @@ let timerInterval = null;
 let recordStart = null;
 let regionRect = null; // { x, y, w, h } como fracciones (0-1) del video capturado
 let regionCleanup = null;
+const pendingAudioMap = new Map(); // tempPath -> tenía audio al grabarse
 
 function formatBytes(bytes) {
   if (!bytes) return '0 B';
@@ -110,13 +127,25 @@ function playChime() {
 
 function notifyRecordingReady(outputPath, finalSizeBytes) {
   try {
-    new Notification('Lowey Screen Recorder', {
+    new Notification(MODE_NAMES[currentMode], {
       body: `Grabación lista: ${outputPath.split(/[\\/]/).pop()} (${formatBytes(finalSizeBytes)})`
     });
   } catch (err) {
     console.error('No se pudo mostrar la notificación:', err);
   }
 }
+
+function setMode(mode) {
+  currentMode = mode;
+  appTitle.textContent = MODE_NAMES[mode];
+  document.title = MODE_NAMES[mode];
+  modeButtons.forEach((btn) => btn.classList.toggle('active', btn.dataset.mode === mode));
+  pendingSection.classList.toggle('hidden', mode !== 'quick');
+}
+
+modeButtons.forEach((btn) => {
+  btn.addEventListener('click', () => setMode(btn.dataset.mode));
+});
 
 async function loadSources() {
   sourcesGrid.innerHTML = '<p class="hint">Cargando…</p>';
@@ -190,6 +219,150 @@ async function loadDefaultOutputDir() {
 async function loadTempDir() {
   tempDirInput.value = await window.lowey.getTempDir();
 }
+
+function formatDate(ms) {
+  return new Date(ms).toLocaleString();
+}
+
+async function loadPendingRecordings() {
+  const items = await window.lowey.listPendingRecordings();
+
+  if (items.length === 0) {
+    pendingList.innerHTML = '<p class="pending-empty">No hay grabaciones esperando a optimizarse.</p>';
+    compressSelectedBtn.disabled = true;
+    return;
+  }
+
+  pendingList.innerHTML = '';
+  items.forEach((item) => {
+    const row = document.createElement('div');
+    row.className = 'pending-item';
+    row.dataset.tempPath = item.tempPath;
+
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.className = 'pending-checkbox';
+    checkbox.addEventListener('change', updateCompressButtonState);
+    row.appendChild(checkbox);
+
+    const info = document.createElement('div');
+    info.className = 'pending-info';
+    info.innerHTML = `
+      <div class="pending-name">${formatDate(item.createdAt)}</div>
+      <div class="pending-meta">${formatBytes(item.sizeBytes)} sin optimizar</div>
+    `;
+    row.appendChild(info);
+
+    const discardBtn = document.createElement('button');
+    discardBtn.className = 'ghost-btn';
+    discardBtn.textContent = 'Descartar';
+    discardBtn.addEventListener('click', async () => {
+      if (!confirm('¿Borrar esta captura sin optimizar? No se puede deshacer.')) return;
+      await window.lowey.discardPendingRecording(item.tempPath);
+      pendingAudioMap.delete(item.tempPath);
+      loadPendingRecordings();
+    });
+    row.appendChild(discardBtn);
+
+    pendingList.appendChild(row);
+  });
+
+  updateCompressButtonState();
+}
+
+function updateCompressButtonState() {
+  const anyChecked = !!pendingList.querySelector('.pending-checkbox:checked');
+  compressSelectedBtn.disabled = !anyChecked;
+}
+
+function extractRecordedAt(tempPathValue) {
+  const match = tempPathValue.match(/rec-(\d+)\.webm$/);
+  return match ? Number(match[1]) : Date.now();
+}
+
+async function compressOne(itemTempPath) {
+  const baseName = `Grabacion_${new Date(extractRecordedAt(itemTempPath)).toISOString().replace(/[:.]/g, '-')}`;
+  const keepAudio = pendingAudioMap.has(itemTempPath) ? pendingAudioMap.get(itemTempPath) : true;
+
+  const result = await window.lowey.finishRecording({
+    tempPath: itemTempPath,
+    outputDir,
+    baseName,
+    qualityId: qualitySelect.value,
+    resolutionId: resolutionSelect.value,
+    keepAudio
+  });
+
+  pendingAudioMap.delete(itemTempPath);
+  return result;
+}
+
+compressSelectedBtn.addEventListener('click', async () => {
+  const checkedRows = Array.from(pendingList.querySelectorAll('.pending-checkbox:checked')).map(
+    (cb) => cb.closest('.pending-item').dataset.tempPath
+  );
+  if (checkedRows.length === 0) return;
+
+  compressSelectedBtn.disabled = true;
+  resultBox.classList.add('hidden');
+  encodeProgressWrap.classList.remove('hidden');
+
+  const unsubscribe = window.lowey.onEncodeProgress(({ progress }) => {
+    encodeProgress.value = Math.round(progress * 100);
+  });
+
+  const results = [];
+  const errors = [];
+
+  for (let i = 0; i < checkedRows.length; i += 1) {
+    encodeProgressLabel.textContent = `Optimizando ${i + 1} de ${checkedRows.length}…`;
+    encodeProgress.value = 0;
+    try {
+      const result = await compressOne(checkedRows[i]);
+      results.push(result);
+    } catch (err) {
+      errors.push(err.message);
+    }
+  }
+
+  unsubscribe();
+  encodeProgressWrap.classList.add('hidden');
+  encodeProgressLabel.textContent = 'Optimizando video (compresión de alta calidad)…';
+
+  resultBox.classList.remove('hidden');
+  resultBox.innerHTML = results
+    .map((result) => {
+      const savedPercent = result.tempSizeBytes
+        ? Math.round((1 - result.finalSizeBytes / result.tempSizeBytes) * 100)
+        : 0;
+      return `
+        <div style="margin-bottom:10px;">
+          <div>Archivo final: <strong>${result.outputPath}</strong></div>
+          <div>Tamaño final: ${formatBytes(result.finalSizeBytes)}</div>
+          ${result.encoderUsed ? `<div>Codificado con: ${result.encoderUsed}</div>` : ''}
+          ${savedPercent > 0 ? `<div class="saving">Ahorro por recompresión: ${savedPercent}%</div>` : ''}
+        </div>
+      `;
+    })
+    .join('') + (errors.length ? `<div>Errores: ${errors.join(' · ')}</div>` : '');
+
+  if (results.length > 0) {
+    playChime();
+    try {
+      new Notification(MODE_NAMES[currentMode], {
+        body: results.length === 1
+          ? `Grabación lista: ${results[0].outputPath.split(/[\\/]/).pop()} (${formatBytes(results[0].finalSizeBytes)})`
+          : `${results.length} grabaciones optimizadas.`
+      });
+    } catch (err) {
+      console.error('No se pudo mostrar la notificación:', err);
+    }
+  }
+
+  await loadPendingRecordings();
+});
+
+refreshPendingBtn.addEventListener('click', loadPendingRecordings);
 
 function stopAllStreams() {
   activeStreams.forEach((stream) => stream.getTracks().forEach((track) => track.stop()));
@@ -403,6 +576,18 @@ async function onRecordingStopped() {
   stopAllStreams();
   await window.lowey.endWriteStream(recordingId);
 
+  if (currentMode === 'quick') {
+    // En este modo, grabar no espera nunca a que se optimice: la captura
+    // queda en "Grabaciones sin optimizar" y el botón se libera al toque.
+    pendingAudioMap.set(tempPath, window.__loweyHasAudio);
+    recordBtn.disabled = false;
+    recordBtn.textContent = '● Iniciar grabación';
+    recordBtn.classList.remove('recording');
+    recTimer.textContent = '00:00:00';
+    await loadPendingRecordings();
+    return;
+  }
+
   recordBtn.disabled = true;
   recordBtn.textContent = '● Iniciar grabación';
   recordBtn.classList.remove('recording');
@@ -594,3 +779,4 @@ loadResolutionOptions();
 loadDefaultOutputDir();
 loadTempDir();
 loadShortcutHint();
+loadPendingRecordings();

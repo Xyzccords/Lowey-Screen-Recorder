@@ -8,7 +8,13 @@
 </head>
 <body>
   <header class="app-header">
-    <h1>Lowey Screen Recorder</h1>
+    <div class="header-title">
+      <h1 id="appTitle">Lowey Screen Recorder</h1>
+      <div class="mode-switch" id="modeSwitch">
+        <button type="button" class="mode-btn active" data-mode="normal">Lowey Screen Recorder</button>
+        <button type="button" class="mode-btn" data-mode="quick">Abi's Quick Recorder</button>
+      </div>
+    </div>
     <div class="rec-status" id="recStatus">
       <span class="dot" id="recDot"></span>
       <span id="recTimer">00:00:00</span>
@@ -31,6 +37,18 @@
         <button id="chooseRegionBtn" class="ghost-btn" disabled>Elegir región…</button>
       </div>
       <small id="regionHint" class="hint"></small>
+
+      <div id="pendingSection" class="hidden">
+        <div class="panel-title pending-title">
+          <h2>Grabaciones sin optimizar</h2>
+          <div>
+            <button id="refreshPending" class="ghost-btn" title="Actualizar lista">⟳</button>
+            <button id="compressSelectedBtn" class="ghost-btn" disabled>Comprimir seleccionadas</button>
+          </div>
+        </div>
+        <p class="hint">En este modo, grabar no espera a que termine de optimizarse lo anterior: elegí acá cuándo comprimir cada captura, con la calidad y resolución de "Opciones".</p>
+        <div id="pendingList" class="pending-list"></div>
+      </div>
     </section>
 
     <section class="panel options-panel">
@@ -101,7 +119,7 @@
       <small id="shortcutHint" class="hint shortcut-hint"></small>
 
       <div id="encodeProgressWrap" class="progress-wrap hidden">
-        <p>Optimizando video (compresión de alta calidad)…</p>
+        <p id="encodeProgressLabel">Optimizando video (compresión de alta calidad)…</p>
         <progress id="encodeProgress" max="100" value="0"></progress>
       </div>
 

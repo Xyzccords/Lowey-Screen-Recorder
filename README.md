@@ -2,7 +2,12 @@
 
 Grabador de pantalla y aplicaciones para escritorio (Windows, macOS, Linux) pensado para lograr **la máxima calidad posible con el menor peso de archivo**, a diferencia de grabadores como Action! que graban directo a un bitrate fijo alto y generan archivos enormes.
 
-> ¿Necesitás grabar seguido, sin esperar a que se optimice cada video para poder grabar el siguiente? Existe una edición separada para eso: **[Abi's Quick Recorder](quick-recorder/README.md)**, con su propio instalador.
+La app tiene un **switch en el encabezado** para cambiar entre dos modos, cada uno con su propio nombre:
+
+- **Lowey Screen Recorder**: al cortar la grabación, se optimiza automáticamente (como se explica abajo).
+- **Abi's Quick Recorder**: grabar no espera nunca a que termine de optimizarse lo anterior — el botón queda libre al instante y la captura va a "Grabaciones sin optimizar", para comprimirla cuando quieras (una por una o varias juntas).
+
+El resto de las funciones (fuentes de captura, región, modos de captura, resolución de salida, atajo de teclado, etc.) son las mismas en los dos modos.
 
 ## Cómo logra "máxima calidad, poco peso"
 
@@ -18,7 +23,7 @@ Al final de cada grabación la app muestra el tamaño de la captura intermedia v
 ## Funciones
 
 - Grabar **toda la pantalla**, **una aplicación/ventana específica**, o **una región elegida a mano** (arrastrando un rectángulo sobre una vista previa).
-- 3 perfiles de calidad final: **Rápida (GPU)** (prueba HEVC y H.264 por NVENC/Quick Sync/AMF, y si no hay GPU compatible cae a CPU sola), **Equilibrada** (H.264 CRF 23, máxima compatibilidad) y **Ligera** (H.264 CRF 28).
+- 4 perfiles de calidad final: **Rápida (GPU)** (prueba HEVC y H.264 por NVENC/Quick Sync/AMF, y si no hay GPU compatible cae a CPU sola), **Equilibrada** (H.264 CRF 23, máxima compatibilidad), **Ligera** (H.264 CRF 28) y **Alta calidad HEVC (audio intacto)** (H.265 CRF 22 en una sola pasada, audio copiado tal cual sin recodificar).
 - **Resolución de salida** independiente de la resolución de captura (Original / 1080p / 720p / 480p) para achicar el peso sin tocar el codec.
 - **Modo de captura**: "Modo Visual Novel" (toda la potencia, para juegos/apps livianas) o "Modo juego exigente" (baja la exigencia de la captura EN VIVO para no competirle recursos a un juego pesado corriendo al mismo tiempo; no afecta la calidad del archivo final).
 - 30 o 60 fps.
@@ -28,6 +33,7 @@ Al final de cada grabación la app muestra el tamaño de la captura intermedia v
 - Sonido y notificación nativa de Windows al terminar de optimizar el video.
 - Indicador flotante mini con el tiempo de grabación (no aparece en la propia grabación) para cuando grabás sin tener la ventana abierta.
 - Atajo de teclado global **"F9"** para iniciar/detener la grabación sin tener que abrir la ventana de la app (así no te tapa lo que estás grabando).
+- En modo **Abi's Quick Recorder**: sección "Grabaciones sin optimizar" para elegir cuándo comprimir cada captura, en vez de hacerlo automático al cortar.
 
 ## Requisitos
 

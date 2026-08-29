@@ -24,6 +24,8 @@ contextBridge.exposeInMainWorld('lowey', {
   endWriteStream: (id) => ipcRenderer.invoke('end-write-stream', id),
 
   finishRecording: (payload) => ipcRenderer.invoke('finish-recording', payload),
+  listPendingRecordings: () => ipcRenderer.invoke('list-pending-recordings'),
+  discardPendingRecording: (tempPath) => ipcRenderer.invoke('discard-pending-recording', tempPath),
   onEncodeProgress: (callback) => {
     const listener = (event, data) => callback(data);
     ipcRenderer.on('encode-progress', listener);

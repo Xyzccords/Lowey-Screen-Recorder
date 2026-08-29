@@ -35,6 +35,37 @@ body {
   font-weight: 600;
 }
 
+.header-title {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mode-switch {
+  display: flex;
+  gap: 4px;
+  background: #14161c;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px;
+  width: fit-content;
+}
+
+.mode-btn {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.mode-btn.active {
+  background: var(--accent);
+  color: white;
+}
+
 .rec-status {
   display: flex;
   align-items: center;
@@ -359,4 +390,55 @@ main {
 
 .hidden {
   display: none !important;
+}
+
+.pending-title {
+  margin-top: 18px;
+}
+
+.pending-title > div {
+  display: flex;
+  gap: 8px;
+}
+
+.pending-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.pending-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: #14161c;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.pending-item .pending-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.pending-item .pending-name {
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pending-item .pending-meta {
+  color: var(--muted);
+}
+
+.pending-empty {
+  color: #6a7180;
+  font-size: 12px;
+  padding: 6px 0;
 }

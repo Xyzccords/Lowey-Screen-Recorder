@@ -47,7 +47,9 @@ function getTempDir() {
 const QUALITY_PRESETS = {
   rapidaGpu: { gpu: true, label: 'Rápida (GPU)' },
   equilibrada: { codec: 'libx264', crf: 23, preset: 'medium', label: 'Equilibrada (H.264 CRF 23)' },
-  ligera: { codec: 'libx264', crf: 28, preset: 'faster', label: 'Ligera (H.264 CRF 28)' }
+  ligera: { codec: 'libx264', crf: 28, preset: 'faster', label: 'Ligera (H.264 CRF 28)' },
+  // Una sola pasada, CRF fijo, audio copiado tal cual (sin recodificar).
+  hevcAudioIntacto: { codec: 'libx265', crf: 22, preset: 'medium', tag: 'hvc1', copyAudio: true, label: 'Alta calidad HEVC (audio intacto)' }
 };
 
 // Salidas de resolución disponibles para achicar el peso final independiente
@@ -283,6 +285,36 @@ ipcMain.handle('end-write-stream', async (event, id) => {
   writeStreams.delete(id);
 });
 
+const PENDING_FILENAME_RE = /^rec-\d+\.webm$/;
+
+ipcMain.handle('list-pending-recordings', () => {
+  const dir = getTempDir();
+  let files;
+  try {
+    files = fs.readdirSync(dir);
+  } catch (err) {
+    return [];
+  }
+
+  return files
+    .filter((name) => PENDING_FILENAME_RE.test(name))
+    .map((name) => {
+      const tempPath = path.join(dir, name);
+      const stat = fs.statSync(tempPath);
+      return { tempPath, sizeBytes: stat.size, createdAt: stat.mtimeMs };
+    })
+    .sort((a, b) => b.createdAt - a.createdAt);
+});
+
+ipcMain.handle('discard-pending-recording', (event, tempPath) => {
+  const dir = getTempDir();
+  const name = path.basename(tempPath);
+  if (path.join(dir, name) !== tempPath || !PENDING_FILENAME_RE.test(name)) {
+    throw new Error('Ruta inválida.');
+  }
+  fs.unlink(tempPath, () => {});
+});
+
 function parseDurationSeconds(text) {
   const match = text.match(/Duration:\s*(\d+):(\d+):(\d+\.\d+)/);
   if (!match) return null;
@@ -339,7 +371,9 @@ ipcMain.handle('finish-recording', async (event, { tempPath, outputDir, baseName
   const targetHeight = RESOLUTION_HEIGHTS[resolutionId] || null;
   const scaleArgs = targetHeight ? ['-vf', `scale=-2:${targetHeight}`] : [];
 
-  const audioArgs = keepAudio ? ['-c:a', 'aac', '-b:a', '160k'] : ['-an'];
+  const audioArgs = keepAudio
+    ? (preset.copyAudio ? ['-c:a', 'copy'] : ['-c:a', 'aac', '-b:a', '160k'])
+    : ['-an'];
   const trailingArgs = ['-pix_fmt', 'yuv420p', ...audioArgs, '-movflags', '+faststart', outputPath];
 
   const encode = (encoderArgs) => runFfmpeg(['-y', '-i', tempPath, ...scaleArgs, ...encoderArgs, ...trailingArgs]);
