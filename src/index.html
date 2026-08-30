@@ -51,12 +51,12 @@
           <button id="captureModeInfoBtn" class="info-btn" type="button" title="¿Qué significa esto?">i</button>
         </div>
         <select id="captureModeSelect">
-          <option value="full">Modo Visual Novel (toda la potencia)</option>
-          <option value="liviano">Modo juego exigente (bajo impacto)</option>
+          <option value="full">CPU (recomendado para juegos)</option>
+          <option value="liviano">GPU (para apps que no exigen la GPU)</option>
         </select>
         <div id="captureModeInfo" class="info-panel hidden">
-          <p><strong>Modo Visual Novel:</strong> usa la máxima calidad de captura en vivo. Pensado para juegos o apps livianas (visual novels, 2D, indies) donde no hay riesgo de que la grabación les saque recursos.</p>
-          <p><strong>Modo juego exigente:</strong> baja la exigencia de la captura EN VIVO (no afecta la calidad del archivo final, solo el momento de grabar) para no competir por CPU con un juego pesado u otra app exigente corriendo al mismo tiempo.</p>
+          <p><strong>CPU (recomendado para juegos):</strong> codifica la captura en vivo por CPU. Para la gran mayoría de los juegos 3D (los que ya usan casi toda tu GPU para renderizar), esta es la mejor opción: la CPU casi no la toca el juego, le sobra lugar — mientras que meterle más trabajo a una GPU ya saturada (la otra opción) le compite recursos al juego y da más lag, no menos. Probado con Genshin real: con CPU, sin lag notorio.</p>
+          <p><strong>GPU:</strong> usa el encoder de video de tu placa (si es compatible) para la captura en vivo en vez de la CPU. Solo conviene cuando lo que grabás exige mucho de CPU pero casi nada de GPU (apps con software rendering, algunos emuladores, cosas 2D). Para un juego 3D que ya exige la GPU, usá la opción de arriba (CPU) — esta puede darte más lag, no menos. Si no hay GPU compatible, cae sola a CPU. No afecta la calidad del archivo final, eso lo resuelve la recompresión al terminar.</p>
         </div>
       </label>
 

@@ -23,10 +23,12 @@
       "main.js",
       "preload.js",
       "src/**/*",
+      "native/**/*",
       "node_modules/**/*"
     ],
     "asarUnpack": [
-      "node_modules/ffmpeg-static/**"
+      "node_modules/ffmpeg-static/**",
+      "native/**"
     ],
     "publish": {
       "provider": "github",
@@ -35,8 +37,7 @@
       "releaseType": "release"
     },
     "win": {
-      "target": "nsis",
-      "requestedExecutionLevel": "requireAdministrator"
+      "target": "nsis"
     },
     "nsis": {
       "oneClick": false,

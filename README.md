@@ -7,7 +7,7 @@ La app tiene un **switch en el encabezado** para cambiar entre dos modos, cada u
 - **Lowey Screen Recorder**: al cortar la grabación, se optimiza automáticamente (como se explica abajo).
 - **Abi's Quick Recorder**: grabar no espera nunca a que termine de optimizarse lo anterior — el botón queda libre al instante y la captura va a "Grabaciones sin optimizar", para comprimirla cuando quieras (una por una o varias juntas).
 
-El resto de las funciones (fuentes de captura, región, modos de captura, resolución de salida, atajo de teclado, etc.) son las mismas en los dos modos.
+El resto de las funciones (fuentes de captura, modos de captura, resolución de salida, atajo de teclado, etc.) son las mismas en los dos modos.
 
 ## Cómo logra "máxima calidad, poco peso"
 
@@ -15,17 +15,19 @@ La mayoría de los grabadores escriben el video final en tiempo real con un bitr
 
 Este grabador separa el proceso en dos etapas:
 
-1. **Captura en tiempo real**: se graba la pantalla/aplicación elegida a un bitrate alto (VP9/WebM) solo para garantizar que no se pierdan cuadros ni se degrade la imagen mientras grabás. Este archivo intermedio es temporal y pesado.
+1. **Captura en tiempo real**: se graba la pantalla/aplicación elegida con `ffmpeg` (no con el `MediaRecorder` del navegador, que en la práctica ignora el límite de bitrate pedido) a un bitrate alto y real, solo para garantizar que no se pierdan cuadros ni se degrade la imagen mientras grabás. Este archivo intermedio es temporal y pesado.
 2. **Recompresión por calidad constante (CRF)**: al detener la grabación, se vuelve a codificar automáticamente con `ffmpeg` usando H.265 o H.264 en modo **CRF** (calidad constante), que asigna más bits solo donde hay más detalle/movimiento y muchos menos donde la imagen es estática (texto, ventanas, IDEs, etc.). El resultado es un archivo final con calidad visual equivalente (o mejor) y un tamaño mucho menor. El archivo intermedio se borra automáticamente al terminar.
 
 Al final de cada grabación la app muestra el tamaño de la captura intermedia vs. el archivo final y el porcentaje de ahorro.
 
 ## Funciones
 
-- Grabar **toda la pantalla**, **una aplicación/ventana específica**, o **una región elegida a mano** (arrastrando un rectángulo sobre una vista previa).
-- 4 perfiles de calidad final: **Rápida (GPU)** (prueba HEVC y H.264 por NVENC/Quick Sync/AMF, y si no hay GPU compatible cae a CPU sola), **Equilibrada** (H.264 CRF 23, máxima compatibilidad), **Ligera** (H.264 CRF 28) y **Alta calidad HEVC (audio intacto)** (H.265 CRF 22 en una sola pasada, audio copiado tal cual sin recodificar).
+- Grabar **toda la pantalla** (recorta al monitor real elegido, no todo el escritorio combinado) o **una aplicación/ventana específica**, juegos incluidos.
+  - Captura de ventana en Windows: intenta primero **Windows.Graphics.Capture** (`native/wgc-capture.exe`, código fuente en `native-src/`), que sí ve contenido acelerado por GPU — a diferencia del método clásico (`gdigrab` por título), que en muchos juegos/apps GPU muestra la ventana en blanco o con contenido incorrecto. Probado con Genshin Impact real. Si no encuentra la ventana o falla, cae solo al método clásico.
+  - La ventana a grabar tiene que estar visible (no minimizada) al arrancar la captura.
+- Un preset de calidad final, **Alta calidad HEVC (audio intacto)** (H.265 CRF 22 en CPU, audio copiado tal cual sin recodificar), que **usa automáticamente la GPU (NVENC) si hay una NVIDIA compatible** para comprimir mucho más rápido, y si no la hay (o falla en el momento) cae solo a CPU sin que el usuario tenga que hacer nada.
 - **Resolución de salida** independiente de la resolución de captura (Original / 1080p / 720p / 480p) para achicar el peso sin tocar el codec.
-- **Modo de captura**: "Modo Visual Novel" (toda la potencia, para juegos/apps livianas) o "Modo juego exigente" (baja la exigencia de la captura EN VIVO para no competirle recursos a un juego pesado corriendo al mismo tiempo; no afecta la calidad del archivo final).
+- **Modo de captura**: "CPU" (recomendado para la gran mayoría de los juegos 3D, que ya usan casi toda la GPU para renderizar — la CPU casi no la toca el juego, le sobra lugar) o "GPU" (usa el encoder de video de la placa para la captura en vivo en vez de la CPU; solo conviene si lo que grabás exige mucho de CPU pero casi nada de GPU — para un juego 3D pesado puede dar más lag, no menos). Ninguno de los dos afecta la calidad del archivo final, eso lo resuelve la recompresión.
 - 30 o 60 fps.
 - Audio del sistema y/o micrófono (se mezclan automáticamente si se activan ambos).
 - Elegir carpeta de destino y **carpeta temporal** por separado (útil si el disco donde Windows guarda los temporales por defecto, normalmente C:, no tiene espacio para grabaciones largas). La elección de carpeta temporal se guarda entre sesiones.

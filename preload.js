@@ -17,6 +17,11 @@ contextBridge.exposeInMainWorld('lowey', {
     ipcRenderer.on('write-error', listener);
     return () => ipcRenderer.removeListener('write-error', listener);
   },
+  onVideoCaptureError: (callback) => {
+    const listener = (event, data) => callback(data);
+    ipcRenderer.on('video-capture-error', listener);
+    return () => ipcRenderer.removeListener('video-capture-error', listener);
+  },
 
   startWriteStream: (payload) => ipcRenderer.invoke('start-write-stream', payload),
   writeChunk: (id, arrayBuffer) => ipcRenderer.send('write-chunk', id, arrayBuffer),

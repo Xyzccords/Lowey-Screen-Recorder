@@ -53,6 +53,7 @@ const RESOLUTION_LABELS = {
 let selectedSourceId = null;
 let selectedSourceName = null;
 let selectedSourceIsScreen = false;
+let selectedSourceBounds = null; // {x, y, width, height} del monitor real (solo para fuentes de pantalla)
 let outputDir = null;
 let audioRecorder = null;
 let isRecording = false;
@@ -160,6 +161,7 @@ async function loadSources() {
       selectedSourceId = source.id;
       selectedSourceName = source.name;
       selectedSourceIsScreen = source.isScreen;
+      selectedSourceBounds = source.bounds || null;
       document.querySelectorAll('.source-card').forEach((c) => c.classList.remove('selected'));
       card.classList.add('selected');
     });
@@ -431,24 +433,21 @@ async function startRecording() {
   const wantSystemAudio = systemAudioToggle.checked;
   const id = `rec-${Date.now()}`;
 
-  // Bitrate de la captura EN VIVO. En "Modo Visual Novel" se prioriza calidad
-  // asumiendo que el juego/app grabado no necesita muchos recursos. En
-  // "Modo juego exigente" se baja bastante para no competirle CPU a un juego
-  // pesado mientras se graba (la calidad del archivo final no se toca acá,
-  // eso lo resuelve la recompresión posterior). A diferencia del navegador,
-  // ffmpeg sí respeta este límite de verdad (-maxrate/-bufsize).
-  const isLowImpact = captureModeSelect.value === 'liviano';
-  const videoBitsPerSecond = isLowImpact
-    ? (fps >= 60 ? 5_000_000 : 4_000_000)
-    : (fps >= 60 ? 9_000_000 : 7_000_000);
+  // El bitrate y si usar GPU para la captura en vivo los decide main.js
+  // según el modo elegido acá — "Calidad máxima" codifica por CPU como
+  // siempre; "Bajo impacto (GPU)" usa el encoder de la GPU para no
+  // pelearle CPU a un juego pesado mientras se graba (con fallback a CPU
+  // si no hay GPU compatible). La calidad del archivo final no se toca
+  // acá, eso lo resuelve la recompresión posterior.
+  const mode = captureModeSelect.value;
 
   let videoCapture;
   try {
     videoCapture = await window.lowey.startVideoCapture({
       id,
       fps,
-      videoBitsPerSecond,
-      source: { name: selectedSourceName, isScreen: selectedSourceIsScreen }
+      mode,
+      source: { id: selectedSourceId, name: selectedSourceName, isScreen: selectedSourceIsScreen, bounds: selectedSourceBounds }
     });
   } catch (err) {
     alert(`No se pudo iniciar la captura de video: ${err.message}`);
@@ -620,6 +619,15 @@ chooseTempFolderBtn.addEventListener('click', async () => {
 
 window.lowey.onWriteError(({ message }) => {
   alert(`No se pudo seguir grabando: ${message}`);
+  if (isRecording) stopRecording();
+});
+
+// La captura de video (ffmpeg) puede morir sola en cualquier momento (disco
+// lleno, se cerró la ventana capturada, crash). Sin este aviso el timer de
+// la UI seguía corriendo como si nada, dando a entender que la grabación
+// seguía viva cuando en realidad ya no había nada grabándose.
+window.lowey.onVideoCaptureError(({ message }) => {
+  alert(`La grabación se interrumpió: ${message}`);
   if (isRecording) stopRecording();
 });
 
