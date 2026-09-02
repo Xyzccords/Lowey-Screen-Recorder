@@ -427,6 +427,19 @@ function createWindow() {
 
   mainWindow.setMenuBarVisibility(false);
   mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
+
+  // El indicador flotante se deja vivo y oculto entre grabaciones (para no
+  // recrearlo cada vez), así que "ventana principal cerrada" NO implica
+  // "cero ventanas abiertas" para Electron: si grabaste al menos una vez,
+  // cerrar la ventana principal no disparaba 'window-all-closed' y la app
+  // entera se quedaba corriendo en segundo plano, invisible, para siempre.
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+    if (floatingWindow && !floatingWindow.isDestroyed()) {
+      floatingWindow.destroy();
+      floatingWindow = null;
+    }
+  });
 }
 
 function createFloatingWindow() {
@@ -738,7 +751,9 @@ function runFfmpeg(args, knownDurationSeconds) {
           const [, h, m, s] = matches[matches.length - 1];
           const t = Number(h) * 3600 + Number(m) * 60 + Number(s);
           const progress = Math.min(1, t / totalDuration);
-          mainWindow.webContents.send('encode-progress', { progress });
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('encode-progress', { progress });
+          }
         }
       }
     });
