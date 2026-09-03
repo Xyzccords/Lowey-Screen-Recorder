@@ -605,11 +605,15 @@ ipcMain.handle('choose-save-folder', async () => {
     properties: ['openDirectory', 'createDirectory']
   });
   if (result.canceled || result.filePaths.length === 0) return null;
-  return result.filePaths[0];
+  settings.outputDir = result.filePaths[0];
+  saveSettings();
+  return settings.outputDir;
 });
 
 ipcMain.handle('get-default-output-dir', () => {
-  return path.join(app.getPath('videos'), 'Lowey Screen Recorder');
+  return settings.outputDir && fs.existsSync(settings.outputDir)
+    ? settings.outputDir
+    : path.join(app.getPath('videos'), 'Lowey Screen Recorder');
 });
 
 ipcMain.handle('get-temp-dir', () => getTempDir());
