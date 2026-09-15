@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self';" />
+  <title>Abiction! - Abi's Quick Recorder</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div class="header-title">
+      <h1>Abiction! - Abi's Quick Recorder</h1>
+    </div>
+    <div class="rec-status" id="recStatus">
+      <span class="dot" id="recDot"></span>
+      <span id="recTimer">00:00:00</span>
+    </div>
+  </header>
+
+  <main>
+    <section class="panel sources-panel">
+      <div class="panel-title">
+        <h2>Pantallas y aplicaciones</h2>
+        <button id="refreshSources" class="ghost-btn" title="Actualizar lista">⟳ Actualizar</button>
+      </div>
+      <div id="sourcesGrid" class="sources-grid"></div>
+
+      <div id="pendingSection">
+        <div class="panel-title pending-title">
+          <h2>Grabaciones sin optimizar</h2>
+          <div>
+            <button id="refreshPending" class="ghost-btn" title="Actualizar lista">⟳</button>
+            <button id="compressSelectedBtn" class="ghost-btn" disabled>Comprimir seleccionadas</button>
+          </div>
+        </div>
+        <p class="hint">Grabar no espera a que termine de optimizarse lo anterior: elegí acá cuándo comprimir cada captura.</p>
+        <div id="pendingList" class="pending-list"></div>
+      </div>
+
+      <div class="panel-title pending-title">
+        <h2>Subir un video para optimizar</h2>
+      </div>
+      <p class="hint">No hace falta que lo hayas grabado con Abiction! — cualquier video pasa por la misma compresión de espacio.</p>
+      <button id="uploadVideoBtn" class="ghost-btn">Elegir video…</button>
+      <div id="uploadResultBox" class="result-box hidden"></div>
+    </section>
+
+    <section class="panel options-panel">
+      <h2>Opciones</h2>
+
+      <label class="field">
+        <div class="field-label-row">
+          <span>Modo de captura</span>
+          <button id="captureModeInfoBtn" class="info-btn" type="button" title="¿Qué significa esto?">i</button>
+        </div>
+        <select id="captureModeSelect">
+          <option value="full">CPU (recomendado para juegos)</option>
+          <option value="liviano">GPU (para apps que no exigen la GPU)</option>
+        </select>
+        <div id="captureModeInfo" class="info-panel hidden">
+          <p><strong>CPU (recomendado para juegos):</strong> codifica la captura en vivo por CPU. Mejor opción si lo que grabás ya exige mucho de la GPU.</p>
+          <p><strong>GPU:</strong> usa el encoder de video de tu placa para la captura en vivo. Conviene cuando lo que grabás exige CPU pero casi nada de GPU. Si no hay GPU compatible, cae sola a CPU.</p>
+        </div>
+      </label>
+
+      <div class="info-panel">
+        <p>Resolución fija: <strong>1080p</strong> · 60 fps · mic siempre activo · audio solo de la ventana grabada (si no se puede, cae a audio de todo el sistema).</p>
+        <p>Destino: <code id="outputDirHint"></code></p>
+        <p>Temporal: <code id="tempDirHint"></code></p>
+      </div>
+
+      <button id="recordBtn" class="record-btn">● Iniciar grabación</button>
+      <small id="shortcutHint" class="hint shortcut-hint"></small>
+
+      <div id="encodeProgressWrap" class="progress-wrap hidden">
+        <p id="encodeProgressLabel">Optimizando video (compresión de alta calidad)…</p>
+        <progress id="encodeProgress" max="100" value="0"></progress>
+      </div>
+
+      <div id="resultBox" class="result-box hidden"></div>
+    </section>
+  </main>
+
+  <script src="renderer.js"></script>
+</body>
+</html>

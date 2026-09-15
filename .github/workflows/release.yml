@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - "v*.*.*"
+      - "abiction-v*.*.*"
   workflow_dispatch: {}
 
 permissions:
@@ -11,6 +12,7 @@ permissions:
 
 jobs:
   build:
+    if: ${{ !startsWith(github.ref, 'refs/tags/abiction-v') }}
     strategy:
       fail-fast: false
       matrix:
@@ -31,6 +33,33 @@ jobs:
         run: npm ci
 
       - name: Build and publish installer
+        run: npx electron-builder --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-abiction:
+    # Abiction! depende de funciones nativas solo de Windows (captura de
+    # ventana por WGC y audio por Process Loopback), así que solo tiene
+    # sentido compilarlo en windows-latest. Usa su propio prefijo de tag
+    # ("abiction-v*.*.*") para no chocar con el versionado de Lowey.
+    if: ${{ startsWith(github.ref, 'refs/tags/abiction-v') || github.event_name == 'workflow_dispatch' }}
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        working-directory: abiction
+        run: npm ci
+
+      - name: Build and publish installer
+        working-directory: abiction
         run: npx electron-builder --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
