@@ -1,6 +1,6 @@
 {
   "name": "abiction-quick-recorder",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Grabador de videollamadas con audio por ventana y compresión de espacio, pensado para Cyberlink PowerDVD.",
   "main": "main.js",
   "private": true,
