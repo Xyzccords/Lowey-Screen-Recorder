@@ -8,24 +8,13 @@ contextBridge.exposeInMainWorld('lowey', {
     ipcRenderer.on('toggle-recording-shortcut', listener);
     return () => ipcRenderer.removeListener('toggle-recording-shortcut', listener);
   },
-  chooseSaveFolder: () => ipcRenderer.invoke('choose-save-folder'),
   getDefaultOutputDir: () => ipcRenderer.invoke('get-default-output-dir'),
   getTempDir: () => ipcRenderer.invoke('get-temp-dir'),
-  chooseTempFolder: () => ipcRenderer.invoke('choose-temp-folder'),
-  onWriteError: (callback) => {
-    const listener = (event, data) => callback(data);
-    ipcRenderer.on('write-error', listener);
-    return () => ipcRenderer.removeListener('write-error', listener);
-  },
   onVideoCaptureError: (callback) => {
     const listener = (event, data) => callback(data);
     ipcRenderer.on('video-capture-error', listener);
     return () => ipcRenderer.removeListener('video-capture-error', listener);
   },
-
-  startWriteStream: (payload) => ipcRenderer.invoke('start-write-stream', payload),
-  writeChunk: (id, arrayBuffer) => ipcRenderer.send('write-chunk', id, arrayBuffer),
-  endWriteStream: (id) => ipcRenderer.invoke('end-write-stream', id),
 
   startVideoCapture: (payload) => ipcRenderer.invoke('start-video-capture', payload),
   stopVideoCapture: (id) => ipcRenderer.invoke('stop-video-capture', id),
@@ -40,8 +29,6 @@ contextBridge.exposeInMainWorld('lowey', {
   },
 
   showInFolder: (filePath) => ipcRenderer.invoke('show-in-folder', filePath),
-
-  getResolutionOptions: () => ipcRenderer.invoke('get-resolution-options'),
 
   notifyRecordingStarted: (startedAt) => ipcRenderer.send('recording-started', startedAt),
   notifyRecordingStopped: () => ipcRenderer.send('recording-stopped'),

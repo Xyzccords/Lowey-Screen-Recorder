@@ -3,17 +3,13 @@
 <head>
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self';" />
-  <title>Lowey Screen Recorder</title>
+  <title>Abi's Quick Recorder</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <header class="app-header">
     <div class="header-title">
-      <h1 id="appTitle">Lowey Screen Recorder</h1>
-      <div class="mode-switch" id="modeSwitch">
-        <button type="button" class="mode-btn active" data-mode="normal">Lowey Screen Recorder</button>
-        <button type="button" class="mode-btn" data-mode="quick">Abi's Quick Recorder</button>
-      </div>
+      <h1>Abi's Quick Recorder</h1>
     </div>
     <div class="rec-status" id="recStatus">
       <span class="dot" id="recDot"></span>
@@ -29,7 +25,7 @@
       </div>
       <div id="sourcesGrid" class="sources-grid"></div>
 
-      <div id="pendingSection" class="hidden">
+      <div id="pendingSection">
         <div class="panel-title pending-title">
           <h2>Grabaciones sin optimizar</h2>
           <div>
@@ -37,7 +33,7 @@
             <button id="compressSelectedBtn" class="ghost-btn" disabled>Comprimir seleccionadas</button>
           </div>
         </div>
-        <p class="hint">En este modo, grabar no espera a que termine de optimizarse lo anterior: elegí acá cuándo comprimir cada captura, con la calidad y resolución de "Opciones".</p>
+        <p class="hint">Grabar no espera a que termine de optimizarse lo anterior: elegí acá cuándo comprimir cada captura.</p>
         <div id="pendingList" class="pending-list"></div>
       </div>
     </section>
@@ -60,45 +56,11 @@
         </div>
       </label>
 
-      <label class="field">
-        <span>Resolución de salida</span>
-        <select id="resolutionSelect"></select>
-      </label>
-
-      <label class="field">
-        <span>Cuadros por segundo</span>
-        <select id="fpsSelect">
-          <option value="30">30 fps</option>
-          <option value="60">60 fps</option>
-        </select>
-      </label>
-
-      <label class="checkbox-field">
-        <input type="checkbox" id="micToggle" />
-        <span>Grabar micrófono</span>
-      </label>
-
-      <label class="checkbox-field">
-        <input type="checkbox" id="systemAudioToggle" checked />
-        <span>Grabar audio del sistema (si está disponible)</span>
-      </label>
-
-      <label class="field">
-        <span>Carpeta de destino</span>
-        <div class="folder-row">
-          <input type="text" id="outputDir" readonly />
-          <button id="chooseFolder" class="ghost-btn">Elegir…</button>
-        </div>
-      </label>
-
-      <label class="field">
-        <span>Carpeta temporal (captura sin optimizar)</span>
-        <div class="folder-row">
-          <input type="text" id="tempDir" readonly />
-          <button id="chooseTempFolder" class="ghost-btn">Elegir…</button>
-        </div>
-        <small class="hint">Cambiala si el disco donde está tu carpeta temporal por defecto (normalmente C:) no tiene espacio suficiente para grabaciones largas.</small>
-      </label>
+      <div class="info-panel">
+        <p>Resolución fija: <strong>720p</strong> · 30 fps · sin micrófono · sin audio del sistema.</p>
+        <p>Destino: <code id="outputDirHint"></code></p>
+        <p>Temporal: <code id="tempDirHint"></code></p>
+      </div>
 
       <button id="recordBtn" class="record-btn">● Iniciar grabación</button>
       <small id="shortcutHint" class="hint shortcut-hint"></small>
