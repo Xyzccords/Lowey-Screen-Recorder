@@ -252,6 +252,23 @@ main {
   cursor: not-allowed;
 }
 
+.pause-btn {
+  width: 100%;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 8px;
+}
+
+.pause-btn:hover {
+  border-color: #444a58;
+}
+
 .shortcut-hint {
   display: block;
   text-align: center;

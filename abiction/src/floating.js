@@ -1,4 +1,5 @@
 const timerEl = document.getElementById('timer');
+const dotEl = document.getElementById('dot');
 let intervalId = null;
 
 function formatElapsed(ms) {
@@ -10,9 +11,25 @@ function formatElapsed(ms) {
   return h > 0 ? `${pad(h)}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
 }
 
-window.abiction.onFloatingStart((startedAt) => {
+function runTimerFrom(startedAt) {
   if (intervalId) clearInterval(intervalId);
   intervalId = setInterval(() => {
     timerEl.textContent = formatElapsed(Date.now() - startedAt);
   }, 500);
+}
+
+window.abiction.onFloatingStart((startedAt) => {
+  dotEl.classList.remove('paused');
+  runTimerFrom(startedAt);
+});
+
+window.abiction.onFloatingPause(() => {
+  if (intervalId) clearInterval(intervalId);
+  intervalId = null;
+  dotEl.classList.add('paused');
+});
+
+window.abiction.onFloatingResume((startedAt) => {
+  dotEl.classList.remove('paused');
+  runTimerFrom(startedAt);
 });

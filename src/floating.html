@@ -39,6 +39,12 @@
       flex-shrink: 0;
     }
 
+    .dot.paused {
+      background: #888;
+      box-shadow: none;
+      animation: none;
+    }
+
     @keyframes pulse {
       0% { box-shadow: 0 0 0 0 rgba(230, 57, 70, 0.6); }
       70% { box-shadow: 0 0 0 6px rgba(230, 57, 70, 0); }
@@ -48,7 +54,7 @@
 </head>
 <body>
   <div class="pill">
-    <span class="dot"></span>
+    <span class="dot" id="dot"></span>
     <span id="timer">00:00</span>
   </div>
   <script src="floating.js"></script>

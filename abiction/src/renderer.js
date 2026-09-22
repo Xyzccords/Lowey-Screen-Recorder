@@ -4,6 +4,7 @@ const captureModeSelect = document.getElementById('captureModeSelect');
 const captureModeInfoBtn = document.getElementById('captureModeInfoBtn');
 const captureModeInfo = document.getElementById('captureModeInfo');
 const recordBtn = document.getElementById('recordBtn');
+const pauseBtn = document.getElementById('pauseBtn');
 const recDot = document.getElementById('recDot');
 const recTimer = document.getElementById('recTimer');
 const encodeProgressWrap = document.getElementById('encodeProgressWrap');
@@ -37,10 +38,12 @@ let selectedSourceIsScreen = false;
 let selectedSourceBounds = null;
 let outputDir = null;
 let isRecording = false;
+let isPaused = false;
 let isStarting = false;
 let videoCaptureId = null;
 let videoPath = null;
 let winAudioPath = null; // audio nativo de la ventana (si el helper funcionó)
+let windowAudioActive = false; // si hay que pausar/reanudar también el audio nativo de ventana
 let micRecorder = null; // MediaRecorder del navegador: mic solo, o mic+sistema mezclados
 let micRecordingId = null;
 let micPath = null;
@@ -48,6 +51,8 @@ let activeStreams = [];
 let audioContext = null;
 let timerInterval = null;
 let recordStart = null;
+let pauseStartedAt = null;
+let accumulatedPauseMs = 0; // tiempo total pausado, para descontarlo del timer y de la duración real
 const pendingDurationMap = new Map(); // id -> duración real grabada, en segundos
 
 function formatBytes(bytes) {
@@ -90,6 +95,31 @@ function playChime() {
     setTimeout(() => ctx.close(), 800);
   } catch (err) {
     console.error('No se pudo reproducir el sonido de aviso:', err);
+  }
+}
+
+// Beep corto y distinto de playChime(), pensado para diagnóstico: solo
+// suena cuando se dispara un ATAJO de teclado (no al clickear un botón).
+// Si la próxima vez un atajo "no hace nada" pero este beep sí se escucha,
+// el problema está en la lógica de la app; si el beep nunca suena, la
+// tecla no le está llegando a la app (otro programa se la está comiendo
+// antes de que la vea Electron).
+function playShortcutBeep() {
+  try {
+    const ctx = new AudioContext();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.frequency.value = 440;
+    osc.type = 'square';
+    gain.gain.setValueAtTime(0, ctx.currentTime);
+    gain.gain.linearRampToValueAtTime(0.12, ctx.currentTime + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.09);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.1);
+    setTimeout(() => ctx.close(), 300);
+  } catch (err) {
+    console.error('No se pudo reproducir el beep de atajo:', err);
   }
 }
 
@@ -382,6 +412,7 @@ async function startRecording() {
   } catch (err) {
     windowAudioOk = false;
   }
+  windowAudioActive = windowAudioOk;
 
   let audioCaptured = { stream: new MediaStream(), hasAudio: false };
   try {
@@ -413,25 +444,31 @@ async function startRecording() {
   }
 
   recordStart = Date.now();
+  accumulatedPauseMs = 0;
+  isPaused = false;
   window.abiction.notifyRecordingStarted(recordStart);
   timerInterval = setInterval(() => {
-    recTimer.textContent = formatTimer(Date.now() - recordStart);
+    recTimer.textContent = formatTimer(Date.now() - recordStart - accumulatedPauseMs);
   }, 500);
 
   recDot.classList.add('live');
   recordBtn.textContent = '■ Detener grabación';
   recordBtn.classList.add('recording');
+  pauseBtn.classList.remove('hidden');
+  pauseBtn.textContent = '⏸ Pausar';
   isRecording = true;
   isStarting = false;
 }
 
 async function stopRecording() {
   isRecording = false;
+  isPaused = false;
   clearInterval(timerInterval);
   recDot.classList.remove('live');
+  pauseBtn.classList.add('hidden');
   window.abiction.notifyRecordingStopped();
 
-  if (micRecorder && micRecorder.state === 'recording') {
+  if (micRecorder && micRecorder.state !== 'inactive') {
     await new Promise((resolve) => {
       micRecorder.onstop = resolve;
       micRecorder.stop();
@@ -443,12 +480,48 @@ async function stopRecording() {
   await window.abiction.stopVideoCapture(videoCaptureId);
   if (winAudioPath) await window.abiction.stopWindowAudioCapture(videoCaptureId);
 
-  pendingDurationMap.set(videoCaptureId, (Date.now() - recordStart) / 1000);
+  // La duración real descuenta el tiempo que estuvo pausada (el video y el
+  // audio finales tampoco incluyen esos tramos, se cortan de los archivos).
+  pendingDurationMap.set(videoCaptureId, (Date.now() - recordStart - accumulatedPauseMs) / 1000);
   recordBtn.disabled = false;
   recordBtn.textContent = '● Iniciar grabación';
   recordBtn.classList.remove('recording');
   recTimer.textContent = '00:00:00';
   await loadPendingRecordings();
+}
+
+async function togglePause() {
+  if (!isRecording) return;
+
+  if (!isPaused) {
+    isPaused = true;
+    pauseStartedAt = Date.now();
+    clearInterval(timerInterval);
+    recDot.classList.remove('live');
+    pauseBtn.textContent = '▶ Reanudar';
+    window.abiction.notifyRecordingPaused();
+
+    await window.abiction.pauseVideoCapture(videoCaptureId);
+    if (windowAudioActive) await window.abiction.pauseWindowAudioCapture(videoCaptureId);
+    if (micRecorder && micRecorder.state === 'recording') micRecorder.pause();
+  } else {
+    accumulatedPauseMs += Date.now() - pauseStartedAt;
+    isPaused = false;
+    recDot.classList.add('live');
+    pauseBtn.textContent = '⏸ Pausar';
+    timerInterval = setInterval(() => {
+      recTimer.textContent = formatTimer(Date.now() - recordStart - accumulatedPauseMs);
+    }, 500);
+    // El "startedAt" que recibe el indicador flotante es virtual: se corre
+    // hacia adelante lo mismo que se pausó, para que su timer (que solo
+    // sabe hacer Date.now() - startedAt) siga mostrando el tiempo real de
+    // grabación sin tener que enterarse de que hubo una pausa.
+    window.abiction.notifyRecordingResumed(recordStart + accumulatedPauseMs);
+
+    await window.abiction.resumeVideoCapture(videoCaptureId);
+    if (windowAudioActive) await window.abiction.resumeWindowAudioCapture(videoCaptureId);
+    if (micRecorder && micRecorder.state === 'paused') micRecorder.resume();
+  }
 }
 
 function toggleRecording() {
@@ -460,7 +533,15 @@ function toggleRecording() {
 }
 
 recordBtn.addEventListener('click', toggleRecording);
-window.abiction.onToggleRecordingShortcut(toggleRecording);
+pauseBtn.addEventListener('click', togglePause);
+window.abiction.onToggleRecordingShortcut(() => {
+  playShortcutBeep();
+  toggleRecording();
+});
+window.abiction.onTogglePauseShortcut(() => {
+  playShortcutBeep();
+  togglePause();
+});
 
 refreshSourcesBtn.addEventListener('click', loadSources);
 
@@ -521,9 +602,11 @@ uploadVideoBtn.addEventListener('click', async () => {
 });
 
 async function loadShortcutHint() {
-  const shortcut = await window.abiction.getRecordShortcut();
+  const recordShortcut = await window.abiction.getRecordShortcut();
+  const pauseShortcut = await window.abiction.getPauseShortcut();
   const shortcutHint = document.getElementById('shortcutHint');
-  shortcutHint.textContent = `Atajo para iniciar/detener sin abrir la ventana: "${shortcut}"`;
+  shortcutHint.textContent =
+    `Atajos sin abrir la ventana — grabar/detener: "${recordShortcut}" · pausar/reanudar: "${pauseShortcut}"`;
 }
 
 loadSources();

@@ -246,88 +246,85 @@ function tryStartWindowCaptureViaWgc(fps, windowIdentifier, videoBitsPerSecond, 
   });
 }
 
-ipcMain.handle('start-video-capture', async (event, { id, fps, mode, source }) => {
-  const videoPath = path.join(getTempDir(), `${id}-video.mp4`);
-  const { useGpu, videoBitsPerSecond } = await resolveLiveCaptureSettings(mode, fps);
+// Lanza UN segmento de captura de video (el primero de una grabación, o uno
+// nuevo después de reanudar de una pausa). Separado de "start-video-capture"
+// para poder reusarlo tal cual en "resume-video-capture" — un segmento
+// nuevo se graba y se cierra exactamente igual que el primero, no importa
+// si es el único de la grabación o el tercero después de dos pausas.
+function spawnVideoSegment(fps, source, useGpu, videoBitsPerSecond, videoPath) {
+  return (async () => {
+    let proc;
+    let helperProc = null;
+    let stderrBuffer = '';
 
-  let proc;
-  let helperProc = null;
-  let stderrBuffer = '';
+    // Solo tiene sentido probar WGC para ventanas puntuales en Windows (para
+    // pantallas completas, gdigrab con offset/video_size ya anda bien y es
+    // más simple).
+    if (process.platform === 'win32' && !source.isScreen) {
+      // El id de una fuente de ventana en Electron/Windows viene como
+      // "window:<hwnd>:0" — ese número es el handle real de la ventana.
+      // Usarlo directo es exacto (a diferencia de buscar por el texto del
+      // título, que puede fallar o agarrar la ventana equivocada si hay dos
+      // con nombres parecidos). Si por algún motivo no matchea ese formato,
+      // se cae al nombre como venía haciendo antes.
+      const hwndMatch = /^window:(\d+):/.exec(source.id || '');
+      const windowIdentifier = hwndMatch ? hwndMatch[1] : source.name;
+      const wgc = await tryStartWindowCaptureViaWgc(fps, windowIdentifier, videoBitsPerSecond, videoPath, useGpu);
+      if (wgc.ok) {
+        proc = wgc.ffmpegProc;
+        helperProc = wgc.helperProc;
+        proc.stderr.on('data', (data) => { stderrBuffer = appendBounded(stderrBuffer, data.toString()); });
+      }
+    }
 
-  // Solo tiene sentido probar WGC para ventanas puntuales en Windows (para
-  // pantallas completas, gdigrab con offset/video_size ya anda bien y es
-  // más simple).
-  if (process.platform === 'win32' && !source.isScreen) {
-    // El id de una fuente de ventana en Electron/Windows viene como
-    // "window:<hwnd>:0" — ese número es el handle real de la ventana.
-    // Usarlo directo es exacto (a diferencia de buscar por el texto del
-    // título, que puede fallar o agarrar la ventana equivocada si hay dos
-    // con nombres parecidos). Si por algún motivo no matchea ese formato,
-    // se cae al nombre como venía haciendo antes.
-    const hwndMatch = /^window:(\d+):/.exec(source.id || '');
-    const windowIdentifier = hwndMatch ? hwndMatch[1] : source.name;
-    const wgc = await tryStartWindowCaptureViaWgc(fps, windowIdentifier, videoBitsPerSecond, videoPath, useGpu);
-    if (wgc.ok) {
-      proc = wgc.ffmpegProc;
-      helperProc = wgc.helperProc;
+    if (!proc) {
+      const inputArgs = buildScreenCaptureInputArgs(fps, source);
+      const args = [...inputArgs, ...buildLiveEncoderArgs(fps, videoBitsPerSecond, useGpu), '-y', videoPath];
+      proc = spawn(ffmpegPath, args);
       proc.stderr.on('data', (data) => { stderrBuffer = appendBounded(stderrBuffer, data.toString()); });
     }
-  }
 
-  if (!proc) {
-    const inputArgs = buildScreenCaptureInputArgs(fps, source);
-    const args = [...inputArgs, ...buildLiveEncoderArgs(fps, videoBitsPerSecond, useGpu), '-y', videoPath];
-    proc = spawn(ffmpegPath, args);
-    proc.stderr.on('data', (data) => { stderrBuffer = appendBounded(stderrBuffer, data.toString()); });
-  }
+    proc.on('error', (err) => {
+      console.error('Error al iniciar la captura de video:', err);
+    });
 
-  proc.on('error', (err) => {
-    console.error('Error al iniciar la captura de video:', err);
-  });
+    return { proc, helperProc, getStderr: () => stderrBuffer };
+  })();
+}
 
-  const entry = { proc, helperProc, videoPath, getStderr: () => stderrBuffer, exited: false, stopRequested: false };
-  videoCaptures.set(id, entry);
-
-  // El evento 'close' de un child process se dispara UNA sola vez, en el
-  // momento real en que el proceso termina. Si ffmpeg muere solo (crash,
-  // disco lleno, se cerró la ventana capturada) ANTES de que el usuario
-  // pida detener, ese evento ya ocurrió: escucharlo recién en
-  // "stop-video-capture" nunca se dispara y la promesa de detener se queda
-  // colgada para siempre. Por eso se trackea acá, apenas se lanza el
-  // proceso, si ya terminó y por qué.
-  proc.once('exit', (code, signal) => {
+// El evento 'close' de un child process se dispara UNA sola vez, en el
+// momento real en que el proceso termina. Si ffmpeg muere solo (crash,
+// disco lleno, se cerró la ventana capturada) ANTES de que el usuario pida
+// detener/pausar, ese evento ya ocurrió: escucharlo recién ahí nunca se
+// dispara y la promesa se queda colgada para siempre. Por eso se trackea
+// acá, apenas se lanza CADA segmento, si ya terminó y por qué.
+function wireSegmentExitHandler(id, entry) {
+  entry.proc.once('exit', (code, signal) => {
     entry.exited = true;
     entry.exitCode = code;
     entry.exitSignal = signal;
 
     if (!entry.stopRequested && mainWindow && !mainWindow.isDestroyed()) {
+      const stderrBuffer = entry.getStderr();
       const message = /no space left on device/i.test(stderrBuffer)
         ? `Se quedó sin espacio en disco en ${TEMP_DIR}.`
         : 'La grabación en vivo se detuvo inesperadamente. Es posible que se haya perdido parte de la captura.';
       mainWindow.webContents.send('video-capture-error', { id, message });
     }
   });
+}
 
-  return { id, videoPath };
-});
-
-ipcMain.handle('stop-video-capture', (event, id) => {
+// Corta prolijamente el segmento ACTIVO de una captura (usado tanto para
+// pausar como para detener de verdad) y espera a que el proceso termine de
+// escribir su archivo. No borra la entrada del mapa ni decide qué hacer
+// después — eso lo resuelve cada llamador.
+function stopActiveSegment(entry) {
   return new Promise((resolve) => {
-    const entry = videoCaptures.get(id);
-    if (!entry) {
+    if (!entry.proc || entry.exited) {
       resolve();
       return;
     }
     entry.stopRequested = true;
-
-    // Si el proceso ya había terminado antes de este pedido (ver el
-    // listener 'exit' de arriba), no hay ningún 'close' pendiente por
-    // esperar: resolver directo evita quedarse colgado para siempre.
-    if (entry.exited) {
-      videoCaptures.delete(id);
-      resolve();
-      return;
-    }
 
     const { proc, helperProc } = entry;
     const forceKillTimer = setTimeout(() => {
@@ -337,7 +334,6 @@ ipcMain.handle('stop-video-capture', (event, id) => {
     proc.once('close', () => {
       clearTimeout(forceKillTimer);
       if (helperProc && !helperProc.killed) helperProc.kill();
-      videoCaptures.delete(id);
       resolve();
     });
 
@@ -363,16 +359,131 @@ ipcMain.handle('stop-video-capture', (event, id) => {
       }
     }
   });
+}
+
+// Une los segmentos de una grabación pausada/reanudada en un solo archivo
+// final, sin recodificar (-c copy): todos los segmentos de una misma
+// grabación salen del mismo "spawnVideoSegment" con los mismos parámetros
+// de encoder, así que el demuxer concat los puede pegar tal cual. El
+// resultado reemplaza al primer segmento (que ya tiene el nombre
+// "<id>-video.mp4" que espera el resto de la app), así el pipeline de
+// "pendientes"/compresión no tiene que enterarse de que hubo pausas.
+function concatSegments(segments, finalPath) {
+  return new Promise((resolve, reject) => {
+    const listPath = `${finalPath}.concat.txt`;
+    const listContent = segments.map((p) => `file '${p.replace(/'/g, "'\\''")}'`).join('\n');
+    fs.writeFileSync(listPath, listContent, 'utf8');
+
+    const mergedPath = `${finalPath}.merged.mp4`;
+    const proc = spawn(ffmpegPath, ['-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-c', 'copy', mergedPath]);
+    let stderrBuffer = '';
+    proc.stderr.on('data', (data) => { stderrBuffer = appendBounded(stderrBuffer, data.toString()); });
+    proc.on('error', reject);
+    proc.on('close', (code) => {
+      fs.unlink(listPath, () => {});
+      if (code !== 0) {
+        reject(new Error(`No se pudieron unir los segmentos de la grabación pausada:\n${stderrBuffer.slice(-1000)}`));
+        return;
+      }
+      fs.rename(mergedPath, finalPath, (err) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+        segments.forEach((p) => { if (p !== finalPath) fs.unlink(p, () => {}); });
+        resolve();
+      });
+    });
+  });
+}
+
+ipcMain.handle('start-video-capture', async (event, { id, fps, mode, source }) => {
+  const videoPath = path.join(getTempDir(), `${id}-video.mp4`);
+  const { useGpu, videoBitsPerSecond } = await resolveLiveCaptureSettings(mode, fps);
+  const { proc, helperProc, getStderr } = await spawnVideoSegment(fps, source, useGpu, videoBitsPerSecond, videoPath);
+
+  const entry = {
+    proc, helperProc, videoPath, getStderr, exited: false, stopRequested: false,
+    segments: [], paused: false,
+    params: { fps, source, useGpu, videoBitsPerSecond }
+  };
+  videoCaptures.set(id, entry);
+  wireSegmentExitHandler(id, entry);
+
+  return { id, videoPath };
+});
+
+ipcMain.handle('pause-video-capture', async (event, id) => {
+  const entry = videoCaptures.get(id);
+  if (!entry || entry.paused) return;
+
+  await stopActiveSegment(entry);
+  entry.segments.push(entry.videoPath);
+  entry.proc = null;
+  entry.helperProc = null;
+  entry.paused = true;
+});
+
+ipcMain.handle('resume-video-capture', async (event, id) => {
+  const entry = videoCaptures.get(id);
+  if (!entry || !entry.paused) return;
+
+  const { fps, source, useGpu, videoBitsPerSecond } = entry.params;
+  const videoPath = path.join(getTempDir(), `${id}-video-part${entry.segments.length + 1}.mp4`);
+  const { proc, helperProc, getStderr } = await spawnVideoSegment(fps, source, useGpu, videoBitsPerSecond, videoPath);
+
+  entry.proc = proc;
+  entry.helperProc = helperProc;
+  entry.getStderr = getStderr;
+  entry.videoPath = videoPath;
+  entry.exited = false;
+  entry.stopRequested = false;
+  entry.paused = false;
+  wireSegmentExitHandler(id, entry);
+});
+
+ipcMain.handle('stop-video-capture', async (event, id) => {
+  const entry = videoCaptures.get(id);
+  if (!entry) return;
+
+  if (!entry.paused) {
+    await stopActiveSegment(entry);
+    entry.segments.push(entry.videoPath);
+  }
+  videoCaptures.delete(id);
+
+  // Sin pausas de por medio (el caso normal), "segments" tiene un solo
+  // elemento que ya es exactamente "<id>-video.mp4" — nada para unir.
+  if (entry.segments.length > 1) {
+    await concatSegments(entry.segments, entry.segments[0]);
+  }
 });
 
 // Atajo global para iniciar/detener la grabación sin tener que hacer foco
 // en la ventana (útil porque abrir la app taparía lo que se está grabando).
 // F9 puede chocar con otros programas que ya lo usan (GeForce Experience,
-// otros grabadores, etc.) — se prueban estos en orden y se usa el primero
-// que se pueda registrar de verdad, en vez de asumir que F9 siempre queda
-// activo.
+// otros grabadores, macros de teclado, etc.) — antes solo se registraba el
+// PRIMERO que lograra activarse; ahora se registran TODOS los que se puedan
+// (no solo el primero), así queda más de un atajo funcionando en simultáneo
+// como respaldo si algún otro programa se come alguno de ellos antes de que
+// llegue a Electron.
 const RECORD_SHORTCUT_CANDIDATES = ['F9', 'F10', 'F11', 'Alt+F9'];
-let activeRecordShortcut = null;
+const PAUSE_SHORTCUT_CANDIDATES = ['F8', 'F7', 'Alt+F8'];
+let activeRecordShortcuts = [];
+let activePauseShortcuts = [];
+
+function registerShortcutCandidates(candidates, eventName) {
+  const active = [];
+  for (const candidate of candidates) {
+    const registered = globalShortcut.register(candidate, () => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send(eventName);
+      }
+    });
+    if (registered) active.push(candidate);
+  }
+  return active;
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -449,19 +560,10 @@ function createFloatingWindow() {
 app.whenReady().then(() => {
   createWindow();
 
-  for (const candidate of RECORD_SHORTCUT_CANDIDATES) {
-    const registered = globalShortcut.register(candidate, () => {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('toggle-recording-shortcut');
-      }
-    });
-    if (registered) {
-      activeRecordShortcut = candidate;
-      break;
-    }
-  }
+  activeRecordShortcuts = registerShortcutCandidates(RECORD_SHORTCUT_CANDIDATES, 'toggle-recording-shortcut');
+  activePauseShortcuts = registerShortcutCandidates(PAUSE_SHORTCUT_CANDIDATES, 'toggle-pause-shortcut');
 
-  if (!activeRecordShortcut) {
+  if (activeRecordShortcuts.length === 0) {
     console.error(`No se pudo registrar ningún atajo (${RECORD_SHORTCUT_CANDIDATES.join(', ')}) — puede que otro programa ya los esté usando.`);
     dialog.showErrorBox(
       "Abi's Quick Recorder",
@@ -469,6 +571,9 @@ app.whenReady().then(() => {
         'Puede que otro programa ya lo esté usando (por ejemplo GeForce Experience u otro grabador). ' +
         'Vas a tener que usar el botón de la ventana para iniciar y detener la grabación.'
     );
+  }
+  if (activePauseShortcuts.length === 0) {
+    console.error(`No se pudo registrar ningún atajo de pausa (${PAUSE_SHORTCUT_CANDIDATES.join(', ')}).`);
   }
 });
 
@@ -546,7 +651,8 @@ ipcMain.handle('get-sources', async () => {
   });
 });
 
-ipcMain.handle('get-record-shortcut', () => activeRecordShortcut || 'ninguno (no se pudo activar)');
+ipcMain.handle('get-record-shortcut', () => activeRecordShortcuts.join(', ') || 'ninguno (no se pudo activar)');
+ipcMain.handle('get-pause-shortcut', () => activePauseShortcuts.join(', ') || 'ninguno (no se pudo activar)');
 
 ipcMain.on('recording-started', (event, startedAt) => {
   if (!floatingWindow || floatingWindow.isDestroyed()) createFloatingWindow();
@@ -562,6 +668,18 @@ ipcMain.on('recording-started', (event, startedAt) => {
 ipcMain.on('recording-stopped', () => {
   if (floatingWindow && !floatingWindow.isDestroyed()) {
     floatingWindow.hide();
+  }
+});
+
+ipcMain.on('recording-paused', () => {
+  if (floatingWindow && !floatingWindow.isDestroyed()) {
+    floatingWindow.webContents.send('floating-pause');
+  }
+});
+
+ipcMain.on('recording-resumed', (event, startedAt) => {
+  if (floatingWindow && !floatingWindow.isDestroyed()) {
+    floatingWindow.webContents.send('floating-resume', startedAt);
   }
 });
 
