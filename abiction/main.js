@@ -123,9 +123,23 @@ function buildScreenCaptureInputArgs(fps, source) {
   return ['-f', 'x11grab', '-framerate', framerate, '-i', process.env.DISPLAY || ':0.0'];
 }
 
+// El .mp4 de captura EN VIVO se escribe fragmentado (moov vacío al
+// principio + un fragmento nuevo por cada keyframe, cada ~2s con este GOP)
+// en vez del mp4 clásico de un solo moov al final: si el proceso muere de
+// cualquier forma antes de cerrar prolijamente, todo lo ya escrito queda
+// como un archivo válido y reproducible — antes, un corte abrupto dejaba
+// el archivo entero sin el índice final ("moov atom not found"), perdiendo
+// TODA la grabación aunque fueran horas. La recompresión final (y la unión
+// de segmentos al pausar) sigue produciendo un mp4 normal. "flush_packets"
+// es necesario además de "movflags": sin él, un SIGKILL real puede perder
+// igual el fragmento recién armado porque queda en el buffer interno de
+// ffmpeg sin llegar a tocar disco (probado a propósito matando el proceso a
+// mitad de grabación: sin este flag el archivo quedaba en unos pocos bytes
+// de todos modos).
 function buildLiveEncoderArgs(fps, videoBitsPerSecond, useGpu) {
   const bps = String(Math.round(videoBitsPerSecond));
   const bufsize = String(Math.round(videoBitsPerSecond * 2));
+  const fragArgs = ['-movflags', 'frag_keyframe+empty_moov+default_base_moof', '-flush_packets', '1'];
   if (useGpu) {
     return [
       '-c:v', 'h264_nvenc',
@@ -136,7 +150,8 @@ function buildLiveEncoderArgs(fps, videoBitsPerSecond, useGpu) {
       '-maxrate', bps,
       '-bufsize', bufsize,
       '-pix_fmt', 'yuv420p',
-      '-g', String(fps * 2)
+      '-g', String(fps * 2),
+      ...fragArgs
     ];
   }
   return [
@@ -146,7 +161,8 @@ function buildLiveEncoderArgs(fps, videoBitsPerSecond, useGpu) {
     '-maxrate', bps,
     '-bufsize', bufsize,
     '-pix_fmt', 'yuv420p',
-    '-g', String(fps * 2)
+    '-g', String(fps * 2),
+    ...fragArgs
   ];
 }
 
@@ -460,6 +476,7 @@ function tryStartWindowAudioViaWgc(hwnd, audioPath) {
           '-f', 'f32le', '-ar', sampleRate, '-ac', channels,
           '-i', 'pipe:0',
           '-c:a', 'aac', '-b:a', '192k',
+          '-movflags', 'frag_keyframe+empty_moov+default_base_moof', '-flush_packets', '1',
           '-y', audioPath
         ]);
         helperProc.stdout.pipe(ffmpegProc.stdin);
@@ -630,14 +647,46 @@ app.whenReady().then(() => {
   }
 });
 
+// Si se cierra la app con una grabación en curso, se le da un margen corto
+// para que ffmpeg (y los helpers de WGC si corresponde) cierren el
+// segmento activo prolijamente — con el .mp4/.m4a fragmentado esto ya no es
+// crítico para no perder la grabación, pero igual evita perder los últimos
+// segundos sin cerrar. Pase lo que pase, no se deja ningún proceso vivo
+// dando vueltas después de "cerrar" la app.
+let quittingCleanly = false;
+app.on('before-quit', (event) => {
+  if (quittingCleanly) return;
+  const entries = [...videoCaptures.values(), ...audioCaptures.values()];
+  if (entries.length === 0) return;
+
+  event.preventDefault();
+  quittingCleanly = true;
+  globalShortcut.unregisterAll();
+
+  const cleanup = Promise.all(entries.map((entry) => stopChildProcess(entry).catch(() => {})));
+  const timeout = new Promise((resolve) => setTimeout(resolve, 4000));
+
+  Promise.race([cleanup, timeout]).then(() => {
+    entries.forEach(({ proc, helperProc }) => {
+      try {
+        if (proc && !proc.killed) proc.kill('SIGKILL');
+      } catch (err) {
+        // ya terminado
+      }
+      if (helperProc) {
+        try {
+          if (!helperProc.killed) helperProc.kill('SIGKILL');
+        } catch (err) {
+          // ya terminado
+        }
+      }
+    });
+    app.quit();
+  });
+});
+
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
-  [...videoCaptures.values(), ...audioCaptures.values()].forEach(({ proc, helperProc }) => {
-    try { proc.kill(); } catch (err) { /* ya terminado */ }
-    if (helperProc) {
-      try { helperProc.kill(); } catch (err) { /* ya terminado */ }
-    }
-  });
 });
 
 app.on('window-all-closed', () => {
@@ -925,6 +974,15 @@ ipcMain.handle('finish-recording', async (event, { videoPath, micPath, winAudioP
   const micSize = micPath && fs.existsSync(micPath) ? fs.statSync(micPath).size : 0;
   const winAudioSize = winAudioPath && fs.existsSync(winAudioPath) ? fs.statSync(winAudioPath).size : 0;
   const finalSize = fs.existsSync(outputPath) ? fs.statSync(outputPath).size : 0;
+
+  // Si por lo que sea la recompresión "terminó bien" pero el resultado
+  // quedó vacío, no tiene sentido borrar la única copia que sí puede
+  // servir para algo — mejor dejar los originales en la cola de
+  // pendientes y avisar del problema.
+  if (finalSize === 0) {
+    fs.unlink(outputPath, () => {});
+    throw new Error('La compresión terminó pero el archivo final quedó vacío — se conserva la grabación original sin optimizar.');
+  }
 
   fs.unlink(videoPath, () => {});
   if (micPath) fs.unlink(micPath, () => {});
