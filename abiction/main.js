@@ -589,6 +589,22 @@ function createWindow() {
   mainWindow.setMenuBarVisibility(false);
   mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
 
+  // Sin esto, Electron rechaza en silencio cualquier getUserMedia (mic y
+  // audio de escritorio) para una ventana cargada con loadFile — no tira
+  // ningún error visible, el catch de buildBrowserAudioStream() lo absorbe
+  // calladito y la grabación termina sin audio ni mic aunque el video ande
+  // perfecto. Esta ventana solo carga nuestro propio index.html (la CSP ya
+  // restringe todo a 'self'), así que no hay riesgo en conceder los
+  // permisos que pida.
+  mainWindow.webContents.session.setPermissionRequestHandler((webContents, permission, callback) => {
+    callback(true);
+  });
+  // Chromium a veces consulta esto ANTES de disparar el pedido de arriba
+  // (por ejemplo para decidir si hace falta preguntar de nuevo) — sin
+  // concederlo acá también, algunas veces seguía bloqueando el acceso al
+  // mic aunque el handler de arriba ya dijera que sí.
+  mainWindow.webContents.session.setPermissionCheckHandler(() => true);
+
   mainWindow.on('closed', () => {
     mainWindow = null;
     if (floatingWindow && !floatingWindow.isDestroyed()) {

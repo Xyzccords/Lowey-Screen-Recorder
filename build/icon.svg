@@ -1,0 +1,21 @@
+
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="bgL" x1="0" y1="0" x2="256" y2="256" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#242938"/>
+      <stop offset="1" stop-color="#0c0e13"/>
+    </linearGradient>
+    <linearGradient id="screenGlow" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4fd1ff" stop-opacity="0.9"/>
+      <stop offset="1" stop-color="#2b7fff" stop-opacity="0.9"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="56" fill="url(#bgL)"/>
+  <rect x="44" y="66" width="168" height="114" rx="16" fill="none" stroke="#eef1f6" stroke-width="12"/>
+  <rect x="52" y="74" width="152" height="98" rx="10" fill="url(#screenGlow)" opacity="0.16"/>
+  <rect x="112" y="182" width="32" height="16" fill="#eef1f6"/>
+  <rect x="84" y="198" width="88" height="13" rx="6.5" fill="#eef1f6"/>
+  <circle cx="198" cy="80" r="32" fill="#e63946"/>
+  <circle cx="198" cy="80" r="32" fill="none" stroke="#0c0e13" stroke-width="7"/>
+  <circle cx="198" cy="80" r="12" fill="#ffb3b8"/>
+</svg>

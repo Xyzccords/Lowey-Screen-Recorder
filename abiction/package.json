@@ -1,6 +1,6 @@
 {
   "name": "abiction-quick-recorder",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Grabador de videollamadas con audio por ventana y compresión de espacio, pensado para Cyberlink PowerDVD.",
   "main": "main.js",
   "private": true,
@@ -19,6 +19,7 @@
   "build": {
     "appId": "com.lowey.abiction",
     "productName": "Abiction! - Abi's Quick Recorder",
+    "icon": "build/icon.png",
     "files": [
       "main.js",
       "preload.js",

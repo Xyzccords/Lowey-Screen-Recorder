@@ -1,6 +1,6 @@
 {
   "name": "lowey-screen-recorder",
-  "version": "1.10.0",
+  "version": "1.11.0",
   "description": "Grabador de pantalla y aplicaciones ligero: máxima calidad con el mínimo peso de archivo posible.",
   "main": "main.js",
   "private": true,
@@ -19,6 +19,7 @@
   "build": {
     "appId": "com.lowey.screenrecorder",
     "productName": "Lowey Screen Recorder",
+    "icon": "build/icon.png",
     "files": [
       "main.js",
       "preload.js",

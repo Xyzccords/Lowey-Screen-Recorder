@@ -330,6 +330,7 @@ function stopAllStreams() {
 // ventana ya lo captura ese proceso aparte).
 async function buildBrowserAudioStream(sourceId, includeSystemAudio) {
   let desktopStream = null;
+  let desktopError = null;
   if (includeSystemAudio) {
     const videoConstraint = { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: sourceId } };
     const desktopAudioConstraint = { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: sourceId } };
@@ -337,6 +338,8 @@ async function buildBrowserAudioStream(sourceId, includeSystemAudio) {
       desktopStream = await navigator.mediaDevices.getUserMedia({ audio: desktopAudioConstraint, video: videoConstraint });
     } catch (err) {
       desktopStream = null;
+      desktopError = err;
+      console.error('No se pudo capturar audio del sistema:', err.name, err.message);
     }
     if (desktopStream) {
       // El video de esta llamada no se usa (el real lo captura ffmpeg
@@ -347,11 +350,14 @@ async function buildBrowserAudioStream(sourceId, includeSystemAudio) {
   }
 
   let micStream = null;
+  let micError = null;
   try {
     micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
     activeStreams.push(micStream);
   } catch (err) {
     micStream = null;
+    micError = err;
+    console.error('No se pudo capturar el micrófono:', err.name, err.message);
   }
 
   const combined = new MediaStream();
@@ -368,7 +374,7 @@ async function buildBrowserAudioStream(sourceId, includeSystemAudio) {
     destination.stream.getAudioTracks().forEach((track) => combined.addTrack(track));
   }
 
-  return { stream: combined, hasAudio: sources.length > 0 };
+  return { stream: combined, hasAudio: sources.length > 0, desktopError, micError };
 }
 
 function pickAudioMimeType() {
@@ -419,6 +425,23 @@ async function startRecording() {
     audioCaptured = await buildBrowserAudioStream(selectedSourceId, !windowAudioOk);
   } catch (err) {
     console.error('No se pudo capturar audio del navegador:', err);
+  }
+
+  // Antes esto fallaba calladito: la grabación salía sin audio ni mic y
+  // recién te enterabas al ver el video terminado. Si ninguna de las dos
+  // fuentes de audio se pudo abrir, se avisa altiro con el motivo real (en
+  // Windows, "NotAllowedError" casi siempre es que el sistema tiene
+  // bloqueado el acceso al micrófono para apps de escritorio — se arregla
+  // en Configuración > Privacidad y seguridad > Micrófono).
+  if (!audioCaptured.hasAudio && !windowAudioOk) {
+    const reason = (audioCaptured.micError && audioCaptured.micError.name)
+      || (audioCaptured.desktopError && audioCaptured.desktopError.name)
+      || 'motivo desconocido';
+    alert(
+      `No se pudo capturar audio ni micrófono (${reason}) — esta grabación va a quedar sin sonido. ` +
+      'Si en Windows nunca te pidió permiso de micrófono, revisá Configuración > Privacidad y seguridad > ' +
+      'Micrófono, y confirmá que "Dejar que las apps de escritorio accedan al micrófono" esté activado.'
+    );
   }
 
   micRecordingId = null;
